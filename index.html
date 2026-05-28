@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Fortress Duel</title>
+  </head>
+  <body>
+    <div id="app">
+      <div id="game-wrap">
+        <div id="lobby">
+          <div class="lobby-panel">
+            <h1>Fortress Duel</h1>
+            <div class="lobby-actions">
+              <button id="create-room" type="button">방 만들기</button>
+              <div class="join-row">
+                <input id="room-code" type="text" maxlength="4" placeholder="ROOM" />
+                <button id="join-room" type="button">입장</button>
+              </div>
+            </div>
+            <p id="lobby-status">서버에 연결 중...</p>
+          </div>
+        </div>
+        <div id="hud">
+          <div class="player-panel player-one">
+            <span class="label">P1</span>
+            <div class="bar"><span id="hp-0"></span></div>
+            <strong id="hp-text-0">100</strong>
+          </div>
+          <div class="readout">
+            <span id="turn">P1 Turn</span>
+            <span id="room-label">Room ----</span>
+            <span id="wind">Wind 0</span>
+            <span id="angle">Angle 45</span>
+            <span id="power">Power 14</span>
+          </div>
+          <div class="player-panel player-two">
+            <span class="label">P2</span>
+            <div class="bar"><span id="hp-1"></span></div>
+            <strong id="hp-text-1">100</strong>
+          </div>
+        </div>
+        <div id="game"></div>
+        <div id="combat-console">
+          <div class="dial-panel">
+            <div id="angle-dial">
+              <span id="angle-needle"></span>
+            </div>
+            <div class="dial-readout">
+              <strong id="console-angle">45</strong>
+              <span>ANGLE</span>
+            </div>
+          </div>
+
+          <div class="console-main">
+            <div class="item-strip">
+              <button type="button" class="tool-button">A</button>
+              <button type="button" class="item-slot">1</button>
+              <button type="button" class="item-slot">2</button>
+              <button type="button" class="item-slot">3</button>
+              <button type="button" class="item-slot">4</button>
+              <div class="delay-box">DELAY</div>
+            </div>
+
+            <div class="meter-row energy-row">
+              <span>ENERGY</span>
+              <div class="hud-meter"><span id="energy-fill"></span></div>
+              <strong id="energy-value">100</strong>
+            </div>
+            <div class="meter-row power-row">
+              <span>POWER</span>
+              <div id="power-track" class="hud-meter" role="slider" aria-label="Target power marker" aria-valuemin="14" aria-valuemax="100" aria-valuenow="55">
+                <span id="power-fill"></span>
+                <span id="last-shot-marker" title="Last shot"></span>
+                <button id="target-marker" type="button" title="Target power marker" aria-label="Target power marker"></button>
+              </div>
+              <strong id="power-value">14</strong>
+            </div>
+            <div class="meter-row move-row">
+              <span>MOVE</span>
+              <div class="hud-meter"><span id="move-fill"></span></div>
+              <strong id="move-value">100</strong>
+            </div>
+          </div>
+
+          <div class="side-console">
+            <div class="wind-box">
+              <span>WIND</span>
+              <strong id="console-wind">0.0</strong>
+            </div>
+            <div class="mini-grid">
+              <span>MAX</span>
+              <strong>100</strong>
+              <span>SHOT</span>
+              <strong id="last-shot-value">--</strong>
+            </div>
+            <div class="controls-help">ARROWS MOVE/AIM · HOLD SPACE · R</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
