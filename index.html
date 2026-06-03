@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Fortress Duel</title>
+  </head>
+  <body>
+    <div id="app">
+      <div id="game-wrap">
+        <div id="lobby">
+          <div class="lobby-panel">
+            <h1>포트리스 듀얼</h1>
+            <div class="lobby-actions">
+              <button id="create-room" type="button">방 만들기</button>
+              <div class="join-row">
+                <input id="room-code" type="text" maxlength="4" placeholder="방 번호" />
+                <button id="join-room" type="button">입장</button>
+              </div>
+            </div>
+            <div id="room-setup" class="room-setup hidden">
+              <div class="room-heading">
+                <strong id="setup-room-code">방 번호 ----</strong>
+                <span id="setup-role">플레이어</span>
+              </div>
+              <div class="name-row">
+                <label for="player-name">내 이름</label>
+                <input id="player-name" type="text" maxlength="12" placeholder="이름 입력" />
+                <button id="save-name" type="button">변경</button>
+              </div>
+              <div id="slot-list" class="slot-list"></div>
+              <div class="setup-actions">
+                <button id="add-computer" type="button">컴퓨터 추가</button>
+                <button id="start-match" type="button">게임 시작</button>
+              </div>
+            </div>
+            <p id="lobby-status">서버에 연결 중...</p>
+          </div>
+        </div>
+        <div id="hud">
+          <div class="player-panel player-one">
+            <span class="label">1번</span>
+            <div class="bar"><span id="hp-0"></span></div>
+            <strong id="hp-text-0">100</strong>
+          </div>
+          <div class="readout">
+            <span id="turn">대기 중</span>
+            <span id="room-label">방 ----</span>
+            <span id="wind">바람 0</span>
+            <span id="angle">각도 45</span>
+            <span id="power">파워 14</span>
+          </div>
+          <div class="player-panel player-two">
+            <span class="label">2번</span>
+            <div class="bar"><span id="hp-1"></span></div>
+            <strong id="hp-text-1">100</strong>
+          </div>
+        </div>
+        <div id="game"></div>
+        <div id="combat-console">
+          <div class="dial-panel">
+            <div id="angle-dial">
+              <span id="angle-needle"></span>
+            </div>
+            <div class="dial-readout">
+              <strong id="console-angle">45</strong>
+              <span>ANGLE</span>
+            </div>
+          </div>
+
+          <div class="console-main">
+            <div class="item-strip">
+              <button type="button" class="tool-button">무기</button>
+              <button type="button" class="item-slot">1</button>
+              <button type="button" class="item-slot">2</button>
+              <button type="button" class="item-slot">3</button>
+              <button type="button" class="item-slot">4</button>
+              <div class="delay-box">순서</div>
+            </div>
+
+            <div class="meter-row energy-row">
+              <span>체력</span>
+              <div class="hud-meter"><span id="energy-fill"></span></div>
+              <strong id="energy-value">100</strong>
+            </div>
+            <div class="meter-row power-row">
+              <span>파워</span>
+              <div id="power-track" class="hud-meter" role="slider" aria-label="목표 파워 마커" aria-valuemin="14" aria-valuemax="100" aria-valuenow="55">
+                <span id="power-fill"></span>
+                <span id="last-shot-marker" title="이전 발사"></span>
+                <button id="target-marker" type="button" title="목표 파워 마커" aria-label="목표 파워 마커"></button>
+              </div>
+              <strong id="power-value">14</strong>
+            </div>
+            <div class="meter-row move-row">
+              <span>이동</span>
+              <div class="hud-meter"><span id="move-fill"></span></div>
+              <strong id="move-value">100</strong>
+            </div>
+          </div>
+
+          <div class="side-console">
+            <div class="wind-box">
+              <span>바람</span>
+              <strong id="console-wind">0.0</strong>
+            </div>
+            <div class="mini-grid">
+              <span>최대</span>
+              <strong>100</strong>
+              <span>이전</span>
+              <strong id="last-shot-value">--</strong>
+            </div>
+            <div class="controls-help">방향키 이동/조준 · 스페이스 발사 · R 재시작</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
