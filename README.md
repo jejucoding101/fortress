@@ -1,66 +1,66 @@
-# Fortress Duel
+# 포트리스 듀얼
 
-Phaser 3, TypeScript, Vite, Socket.IO prototype inspired by classic 2D turn-based artillery games.
+Phaser 3, TypeScript, Vite, Socket.IO로 만든 2D 턴제 포격 게임 프로토타입입니다.
 
-## Run
+## 실행
 
 ```bash
 npm install
 npm run dev
 ```
 
-Open `http://localhost:5173` in a browser.
+브라우저에서 `http://localhost:5173`으로 접속합니다.
 
-For another computer on the same network, open:
+같은 네트워크의 다른 컴퓨터에서는 아래 주소로 접속합니다.
 
 ```txt
-http://YOUR_HOST_IP:5173
+http://호스트컴퓨터IP:5173
 ```
 
-The game server runs on port `3000`. If a client cannot connect automatically, start the client with:
+게임 서버는 `3000` 포트에서 실행됩니다. 클라이언트가 서버를 자동으로 찾지 못하면 아래처럼 서버 주소를 지정해 실행합니다.
 
 ```bash
-VITE_SERVER_URL=http://YOUR_HOST_IP:3000 npm run dev:client
+VITE_SERVER_URL=http://호스트컴퓨터IP:3000 npm run dev:client
 ```
 
-## Multiplayer
+## 멀티플레이
 
-- Click `방 만들기` on the first computer.
-- The host can add computer players before starting.
-- Use the team selectors to assign humans and computers to teams.
-- Share the four-letter room code.
-- Enter the room code on the second computer and click `입장`.
-- Only the active player can move, aim, and fire.
-- The server owns turn order, projectile simulation, terrain craters, damage, and victory state.
+- 첫 번째 컴퓨터에서 `방 만들기`를 누릅니다.
+- 방장은 게임 시작 전에 컴퓨터 플레이어를 추가할 수 있습니다.
+- 왼쪽 편/오른쪽 편 영역에서 사람과 컴퓨터의 편을 나눕니다.
+- 표시된 네 글자 방 번호를 다른 플레이어에게 공유합니다.
+- 두 번째 컴퓨터에서 방 번호를 입력하고 `입장`을 누릅니다.
+- 현재 턴 플레이어만 이동, 조준, 발사할 수 있습니다.
+- 서버가 턴 순서, 포탄 시뮬레이션, 지형 파괴, 데미지, 승패를 관리합니다.
 
-## Single Player
+## 1인용
 
-- Click `방 만들기`.
-- Click `컴퓨터 추가`.
-- Keep the human and computer on different teams.
-- Click `게임 시작`.
-- The computer player chooses targets, simulates angle/power candidates on the server, fires, and adjusts using previous shot memory.
+- `방 만들기`를 누릅니다.
+- `컴퓨터 추가`를 누릅니다.
+- 사람과 컴퓨터를 서로 다른 편에 둡니다.
+- `게임 시작`을 누릅니다.
+- 컴퓨터 플레이어는 서버에서 목표를 고르고, 각도/파워 후보를 시뮬레이션한 뒤 발사합니다.
 
-## Controls
+## 조작
 
-- `Left`, `Right`: move the active tank
-- `Up`, `Down`: adjust cannon angle
-- Hold `Space`: charge shot power
-- Release `Space`: fire
-- Click or drag the bottom marker: set a target power reference
-- `R`: restart
+- `Left`, `Right`: 현재 탱크 이동
+- `Up`, `Down`: 포신 각도 조절
+- `Space` 길게 누르기: 파워 충전
+- `Space` 떼기: 발사
+- 하단 파워바 마커 클릭/드래그: 목표 파워 기준 설정
+- `R`: 재시작
 
-## Implemented
+## 구현된 기능
 
-- Two-player turn-based battle
-- Terrain-aware tank movement
-- Hold-to-charge shot power
-- Bottom power gauge
-- Persistent last-shot power marker
-- Adjustable target power marker
-- Wind-influenced projectile arc
-- Terrain collision
-- Destructible circular craters
-- Distance-based explosion damage
-- HP HUD
-- Win/loss state
+- 온라인 방 만들기/입장
+- 사람 플레이어 이름 변경
+- 컴퓨터 플레이어 추가/삭제
+- 왼쪽 편/오른쪽 편 팀 구성
+- 서버 권위 턴제 전투
+- 컴퓨터 플레이어 자동 조준/발사
+- 이동량, 체력, 파워 HUD
+- 바람 영향을 받는 포탄
+- 바람 방향을 보여주는 눈송이 배경 효과
+- 지형 충돌과 원형 지형 파괴
+- 폭발 거리 기반 데미지
+- 팀 승패 판정
