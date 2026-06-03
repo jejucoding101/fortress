@@ -119,7 +119,7 @@ export class GameSession {
     this.resetCombatState();
     this.state.phase = "aim";
     this.state.activePlayerId = this.state.players.find((player) => player.hp > 0)!.id;
-    this.state.message = `${this.currentPlayer.name} 턴`;
+      this.state.message = `${this.currentPlayer.name} 턴`;
     this.sync();
   }
 
