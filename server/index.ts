@@ -37,6 +37,26 @@ io.on("connection", (socket) => {
     callback(payload);
   });
 
+  socket.on("setPlayerName", (name) => {
+    rooms.setPlayerName(socket.id, currentRoomId, name);
+  });
+
+  socket.on("addComputerPlayer", (difficulty) => {
+    rooms.addComputer(socket.id, currentRoomId, difficulty);
+  });
+
+  socket.on("removeComputerPlayer", (playerId) => {
+    rooms.removeComputer(socket.id, currentRoomId, playerId);
+  });
+
+  socket.on("setTeam", (playerId, teamId) => {
+    rooms.setTeam(socket.id, currentRoomId, playerId, teamId);
+  });
+
+  socket.on("startMatch", () => {
+    rooms.startMatch(socket.id, currentRoomId);
+  });
+
   socket.on("playerMove", (direction) => {
     rooms.getRoom(currentRoomId)?.move(socket.id, direction);
   });

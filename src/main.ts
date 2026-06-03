@@ -2,9 +2,9 @@ import Phaser from "phaser";
 import { io, type Socket } from "socket.io-client";
 import {
   DEFAULT_TARGET_POWER,
-  MAX_HP,
   MAX_POWER,
   MIN_POWER,
+  TEAM_IDS,
   WORLD_HEIGHT,
   WORLD_WIDTH
 } from "./shared/constants.js";
@@ -13,13 +13,22 @@ import type {
   ClientToServerEvents,
   GameState,
   PlayerId,
+  PlayerState,
   ServerToClientEvents,
+  TeamId,
   TerrainCrater
 } from "./shared/types.js";
 import "./styles.css";
 
 type ProjectileView = {
   sprite: Phaser.GameObjects.Arc;
+};
+
+type Snowflake = {
+  sprite: Phaser.GameObjects.Arc;
+  speed: number;
+  drift: number;
+  phase: number;
 };
 
 let socket: Socket<ServerToClientEvents, ClientToServerEvents>;
@@ -31,8 +40,8 @@ class BattleScene extends Phaser.Scene {
   private terrainCanvas!: HTMLCanvasElement;
   private terrainContext!: CanvasRenderingContext2D;
   private terrainTexture!: Phaser.Textures.CanvasTexture;
-  private terrainImage!: Phaser.GameObjects.Image;
   private tankViews: Phaser.GameObjects.Container[] = [];
+  private snowflakes: Snowflake[] = [];
   private projectile?: ProjectileView;
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private fireKey!: Phaser.Input.Keyboard.Key;
@@ -54,8 +63,9 @@ class BattleScene extends Phaser.Scene {
     battleScene = this;
     this.cameras.main.setBackgroundColor("#78bde7");
     this.createSky();
+    this.createWeatherParticles();
     this.createTerrain([]);
-    this.createTankViews();
+    this.ensureTankViews(2);
 
     this.cursors = this.input.keyboard!.createCursorKeys();
     this.fireKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
@@ -88,12 +98,15 @@ class BattleScene extends Phaser.Scene {
     }
 
     this.updateProjectile();
+    this.updateWeatherParticles(deltaMs / 1000);
     this.refreshHud();
   }
 
   applyState(state?: GameState) {
     if (!state) return;
     currentState = state;
+    updateLobbyState(state);
+    this.ensureTankViews(state.players.length);
 
     if (state.terrainHoles.length !== this.appliedCraterCount) {
       const newHoles = state.terrainHoles.slice(this.appliedCraterCount);
@@ -107,10 +120,10 @@ class BattleScene extends Phaser.Scene {
       if (!view) return;
       view.setPosition(player.x, player.y);
       view.setRotation(player.slope);
-      view.setAlpha(player.hp <= 0 ? 0.35 : index === state.activePlayerId ? 1 : 0.72);
+      view.setAlpha(player.hp <= 0 ? 0.35 : player.id === state.activePlayerId ? 1 : 0.72);
       const turret = view.list[1] as Phaser.GameObjects.Rectangle;
       turret.rotation = Phaser.Math.DegToRad(-player.angle) - player.slope;
-      turret.setFillStyle(index === state.activePlayerId ? 0xf8fbff : 0x263342);
+      turret.setFillStyle(player.id === state.activePlayerId ? 0xf8fbff : 0x263342);
     });
 
     if (state.phase !== "flying") {
@@ -181,6 +194,47 @@ class BattleScene extends Phaser.Scene {
     mountain.fillTriangle(768, 176, 718, 238, 810, 238);
   }
 
+  private createWeatherParticles() {
+    this.snowflakes.forEach((flake) => flake.sprite.destroy());
+    this.snowflakes = [];
+
+    for (let index = 0; index < 42; index += 1) {
+      const size = Phaser.Math.FloatBetween(1.2, 2.8);
+      const sprite = this.add
+        .circle(
+          Phaser.Math.Between(0, WORLD_WIDTH),
+          Phaser.Math.Between(-WORLD_HEIGHT, WORLD_HEIGHT),
+          size,
+          0xf4fbff,
+          Phaser.Math.FloatBetween(0.34, 0.78)
+        )
+        .setDepth(2);
+      this.snowflakes.push({
+        sprite,
+        speed: Phaser.Math.FloatBetween(18, 52),
+        drift: Phaser.Math.FloatBetween(10, 32),
+        phase: Phaser.Math.FloatBetween(0, Math.PI * 2)
+      });
+    }
+  }
+
+  private updateWeatherParticles(delta: number) {
+    const wind = currentState?.wind ?? 0;
+    this.snowflakes.forEach((flake) => {
+      flake.phase += delta * 1.8;
+      flake.sprite.x += wind * flake.drift * delta + Math.sin(flake.phase) * 8 * delta;
+      flake.sprite.y += flake.speed * delta;
+
+      if (flake.sprite.y > WORLD_HEIGHT + 8) {
+        flake.sprite.y = Phaser.Math.Between(-80, -8);
+        flake.sprite.x = Phaser.Math.Between(0, WORLD_WIDTH);
+      }
+
+      if (flake.sprite.x < -12) flake.sprite.x = WORLD_WIDTH + 12;
+      if (flake.sprite.x > WORLD_WIDTH + 12) flake.sprite.x = -12;
+    });
+  }
+
   private createTerrain(holes: TerrainCrater[]) {
     if (!this.terrainTexture) {
       const texture = this.textures.createCanvas("terrain", WORLD_WIDTH, WORLD_HEIGHT);
@@ -188,7 +242,7 @@ class BattleScene extends Phaser.Scene {
       this.terrainTexture = texture;
       this.terrainCanvas = this.terrainTexture.getSourceImage() as HTMLCanvasElement;
       this.terrainContext = this.terrainCanvas.getContext("2d", { willReadFrequently: true })!;
-      this.terrainImage = this.add.image(0, 0, "terrain").setOrigin(0);
+      this.add.image(0, 0, "terrain").setOrigin(0);
     }
 
     const points: Array<{ x: number; y: number }> = [];
@@ -223,9 +277,10 @@ class BattleScene extends Phaser.Scene {
     this.terrainTexture.refresh();
   }
 
-  private createTankViews() {
-    this.tankViews = [0, 1].map((index) => {
-      const color = index === 0 ? 0x45c7ff : 0xff9152;
+  private ensureTankViews(count: number) {
+    while (this.tankViews.length < count) {
+      const index = this.tankViews.length;
+      const color = currentState?.players[index]?.color ?? (index === 0 ? 0x45c7ff : 0xff9152);
       const container = this.add.container(-100, -100).setDepth(3);
       const body = this.add.graphics();
       body.fillStyle(color, 1);
@@ -237,7 +292,11 @@ class BattleScene extends Phaser.Scene {
       body.fillCircle(10, 7, 3);
       const turret = this.add.rectangle(0, -14, 30, 6, 0x263342).setOrigin(0, 0.5);
       container.add([body, turret]);
-      return container;
+      this.tankViews.push(container);
+    }
+
+    this.tankViews.forEach((view, index) => {
+      view.setVisible(index < count);
     });
   }
 
@@ -267,8 +326,9 @@ class BattleScene extends Phaser.Scene {
 
   private refreshHud() {
     if (!currentState) return;
-    const currentPlayer = currentState.players[currentState.activePlayerId];
-    const hudPlayer = localPlayerId === undefined ? currentPlayer : currentState.players[localPlayerId];
+    const currentPlayer = getActivePlayer(currentState);
+    if (!currentPlayer) return;
+    const hudPlayer = localPlayerId === undefined ? currentPlayer : getPlayerById(currentState, localPlayerId) ?? currentPlayer;
     const shownPower = this.isChargingShot ? this.localPower : currentPlayer.power;
     const hp0 = document.querySelector<HTMLSpanElement>("#hp-0")!;
     const hp1 = document.querySelector<HTMLSpanElement>("#hp-1")!;
@@ -293,15 +353,15 @@ class BattleScene extends Phaser.Scene {
     const angleNeedle = document.querySelector<HTMLElement>("#angle-needle")!;
     const lastShotValue = document.querySelector<HTMLElement>("#last-shot-value")!;
 
-    hp0.style.width = `${currentState.players[0].hp}%`;
-    hp1.style.width = `${currentState.players[1].hp}%`;
-    hpText0.textContent = `${currentState.players[0].hp}`;
-    hpText1.textContent = `${currentState.players[1].hp}`;
+    hp0.style.width = `${currentState.players[0]?.hp ?? 0}%`;
+    hp1.style.width = `${currentState.players[1]?.hp ?? 0}%`;
+    hpText0.textContent = `${currentState.players[0]?.hp ?? 0}`;
+    hpText1.textContent = `${currentState.players[1]?.hp ?? 0}`;
     turn.textContent = currentState.message;
-    roomLabel.textContent = `Room ${currentState.roomId}`;
-    wind.textContent = `Wind ${currentState.wind >= 0 ? ">" : "<"} ${Math.abs(currentState.wind).toFixed(1)}`;
-    angle.textContent = `Angle ${Math.round(currentPlayer.angle)}`;
-    power.textContent = `Power ${Math.round(shownPower)}`;
+    roomLabel.textContent = `방 ${currentState.roomId}`;
+    wind.textContent = `바람 ${currentState.wind >= 0 ? ">" : "<"} ${Math.abs(currentState.wind).toFixed(1)}`;
+    angle.textContent = `각도 ${Math.round(currentPlayer.angle)}`;
+    power.textContent = `파워 ${Math.round(shownPower)}`;
     powerValue.textContent = `${Math.round(shownPower)}`;
     energyValue.textContent = `${hudPlayer.hp}`;
     energyFill.style.width = `${hudPlayer.hp}%`;
@@ -351,7 +411,8 @@ class BattleScene extends Phaser.Scene {
     return (
       currentState?.phase === "aim" &&
       localPlayerId !== undefined &&
-      currentState.activePlayerId === localPlayerId
+      currentState.activePlayerId === localPlayerId &&
+      getActivePlayer(currentState)?.kind === "human"
     );
   }
 
@@ -359,8 +420,8 @@ class BattleScene extends Phaser.Scene {
     if (state.phase === "waiting") return state.message;
     if (localPlayerId === undefined) return state.message;
     if (state.phase === "gameover") return state.message;
-    if (state.phase === "flying") return "Shot in flight";
-    return state.activePlayerId === localPlayerId ? "Your turn" : "Opponent turn";
+    if (state.phase === "flying") return "포탄 비행 중";
+    return state.activePlayerId === localPlayerId ? "내 턴" : `${getActivePlayer(state)?.name ?? "상대"} 턴`;
   }
 
   private powerToPercent(power: number) {
@@ -369,7 +430,8 @@ class BattleScene extends Phaser.Scene {
 
   private angleToDialRotation(angle: number) {
     if (!currentState) return -45;
-    const normalized = currentState.activePlayerId === 0 ? angle : 180 - angle;
+    const player = getActivePlayer(currentState);
+    const normalized = (player?.x ?? 0) <= WORLD_WIDTH / 2 ? angle : 180 - angle;
     return clamp(normalized - 90, -85, -5);
   }
 }
@@ -398,7 +460,7 @@ function setupSocket() {
   socket = io(serverUrl);
 
   socket.on("connect", () => {
-    setLobbyStatus("서버 연결됨. 방을 만들거나 입장하세요.");
+    setLobbyStatus("서버에 연결되었습니다. 방을 만들거나 입장하세요.");
   });
 
   socket.on("disconnect", () => {
@@ -412,6 +474,7 @@ function setupSocket() {
 
   socket.on("stateSync", (state) => {
     currentState = state;
+    updateLobbyState(state);
     battleScene?.applyState(state);
   });
 
@@ -422,6 +485,10 @@ function setupLobby() {
   const createButton = document.querySelector<HTMLButtonElement>("#create-room")!;
   const joinButton = document.querySelector<HTMLButtonElement>("#join-room")!;
   const input = document.querySelector<HTMLInputElement>("#room-code")!;
+  const addComputerButton = document.querySelector<HTMLButtonElement>("#add-computer")!;
+  const startMatchButton = document.querySelector<HTMLButtonElement>("#start-match")!;
+  const nameInput = document.querySelector<HTMLInputElement>("#player-name")!;
+  const saveNameButton = document.querySelector<HTMLButtonElement>("#save-name")!;
 
   createButton.addEventListener("click", () => {
     socket.emit("createRoom", applyJoinPayload);
@@ -430,10 +497,32 @@ function setupLobby() {
   joinButton.addEventListener("click", () => {
     const roomId = input.value.trim().toUpperCase();
     if (!roomId) {
-      setLobbyStatus("방 코드를 입력하세요.");
+      setLobbyStatus("방 번호를 입력하세요.");
       return;
     }
     socket.emit("joinRoom", roomId, applyJoinPayload);
+  });
+
+  addComputerButton.addEventListener("click", () => {
+    socket.emit("addComputerPlayer", "normal");
+  });
+
+  startMatchButton.addEventListener("click", () => {
+    socket.emit("startMatch");
+  });
+
+  saveNameButton.addEventListener("click", () => {
+    const name = nameInput.value.trim();
+    if (!name) {
+      setLobbyStatus("사용할 이름을 입력하세요.");
+      return;
+    }
+    socket.emit("setPlayerName", name);
+  });
+
+  nameInput.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    saveNameButton.click();
   });
 }
 
@@ -450,13 +539,128 @@ function applyJoinPayload(payload: {
   }
 
   localPlayerId = payload.playerId;
-  document.querySelector<HTMLElement>("#lobby")!.classList.add("hidden");
+  document.querySelector<HTMLElement>(".lobby-actions")!.classList.add("hidden");
+  document.querySelector<HTMLElement>("#room-setup")!.classList.remove("hidden");
   if (payload.state) {
     currentState = payload.state;
+    updateLobbyState(payload.state);
     battleScene?.applyState(payload.state);
   }
 }
 
 function setLobbyStatus(message: string) {
   document.querySelector<HTMLElement>("#lobby-status")!.textContent = message;
+}
+
+function updateLobbyState(state: GameState) {
+  const lobby = document.querySelector<HTMLElement>("#lobby")!;
+  const setup = document.querySelector<HTMLElement>("#room-setup")!;
+  const slotList = document.querySelector<HTMLElement>("#slot-list")!;
+  const roomCode = document.querySelector<HTMLElement>("#setup-room-code")!;
+  const role = document.querySelector<HTMLElement>("#setup-role")!;
+  const addComputer = document.querySelector<HTMLButtonElement>("#add-computer")!;
+  const startMatch = document.querySelector<HTMLButtonElement>("#start-match")!;
+  const nameInput = document.querySelector<HTMLInputElement>("#player-name")!;
+  const isHost = socket?.id === state.hostSocketId;
+  const localPlayer = localPlayerId === undefined ? undefined : getPlayerById(state, localPlayerId);
+
+  if (state.phase !== "waiting") {
+    lobby.classList.add("hidden");
+    return;
+  }
+
+  lobby.classList.remove("hidden");
+  setup.classList.remove("hidden");
+  roomCode.textContent = `방 번호 ${state.roomId}`;
+  role.textContent = isHost ? "방장" : "플레이어";
+  addComputer.disabled = !isHost;
+  startMatch.disabled = !isHost;
+  if (localPlayer && document.activeElement !== nameInput) {
+    nameInput.value = localPlayer.name;
+  }
+  slotList.innerHTML = "";
+
+  const leftColumn = createTeamColumn("A", "왼쪽 편", state, isHost);
+  const rightColumn = createTeamColumn("B", "오른쪽 편", state, isHost);
+  slotList.append(leftColumn, rightColumn);
+  setLobbyStatus(`방 번호 ${state.roomId} · 왼쪽/오른쪽 편을 정한 뒤 게임을 시작하세요.`);
+}
+
+function createSlotIndex(index: number) {
+  const element = document.createElement("span");
+  element.className = "slot-index";
+  element.textContent = `${index}`;
+  return element;
+}
+
+function createSlotName(player: PlayerState) {
+  const wrapper = document.createElement("span");
+  wrapper.className = "slot-name";
+  const kind = document.createElement("span");
+  const name = document.createElement("strong");
+  const meta = document.createElement("span");
+  kind.className = `slot-kind ${player.kind === "computer" ? "computer-kind" : "human-kind"}`;
+  kind.textContent = player.kind === "computer" ? "CPU" : "USER";
+  name.textContent = player.name;
+  meta.textContent = `${player.kind === "computer" ? "컴퓨터" : "사람"} - ${player.teamId === "A" ? "왼쪽 편" : "오른쪽 편"}`;
+  wrapper.append(kind, name);
+  return wrapper;
+}
+
+function createTeamColumn(teamId: TeamId, label: string, state: GameState, isHost: boolean) {
+  const column = document.createElement("div");
+  column.className = `team-column ${teamId === "A" ? "left-team" : "right-team"}`;
+  const title = document.createElement("div");
+  title.className = "team-title";
+  const count = state.players.filter((player) => player.teamId === teamId).length;
+  title.innerHTML = `<strong>${label}</strong><span>${count}명</span>`;
+  column.append(title);
+
+  state.players
+    .filter((player) => player.teamId === teamId)
+    .forEach((player) => {
+      const row = document.createElement("div");
+      row.className = `slot-row ${player.kind === "computer" ? "computer-slot" : "human-slot"}`;
+      row.append(createSlotIndex(player.slotIndex + 1));
+      row.append(createSlotName(player));
+      row.append(createSideButton(player, teamId === "A" ? "B" : "A", isHost));
+      row.append(createRemoveButton(player, isHost));
+      column.append(row);
+    });
+
+  return column;
+}
+
+function createSideButton(player: PlayerState, targetTeamId: TeamId, isHost: boolean) {
+  const button = document.createElement("button");
+  button.className = "side-button";
+  button.type = "button";
+  button.textContent = targetTeamId === "A" ? "←" : "→";
+  const canChange = isHost || (player.kind === "human" && player.id === localPlayerId);
+  button.disabled = !canChange;
+  button.title = targetTeamId === "A" ? "왼쪽 편으로 이동" : "오른쪽 편으로 이동";
+  button.addEventListener("click", () => {
+    socket.emit("setTeam", player.id, targetTeamId);
+  });
+  return button;
+}
+
+function createRemoveButton(player: PlayerState, isHost: boolean) {
+  const button = document.createElement("button");
+  button.className = "remove-cpu";
+  button.type = "button";
+  button.textContent = "X";
+  button.disabled = !isHost || player.kind !== "computer";
+  button.addEventListener("click", () => {
+    socket.emit("removeComputerPlayer", player.id);
+  });
+  return button;
+}
+
+function getPlayerById(state: GameState, playerId: PlayerId) {
+  return state.players.find((player) => player.id === playerId);
+}
+
+function getActivePlayer(state: GameState) {
+  return getPlayerById(state, state.activePlayerId);
 }

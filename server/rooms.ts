@@ -1,5 +1,5 @@
 import type { Server } from "socket.io";
-import type { ClientToServerEvents, ServerToClientEvents } from "../src/shared/types.js";
+import type { AIDifficulty, ClientToServerEvents, ServerToClientEvents } from "../src/shared/types.js";
 import { GameSession } from "./gameSession.js";
 
 export class RoomManager {
@@ -9,7 +9,7 @@ export class RoomManager {
 
   createRoom(socketId: string) {
     const roomId = this.createRoomId();
-    const room = new GameSession(roomId, (state) => {
+    const room = new GameSession(roomId, socketId, (state) => {
       this.io.to(roomId).emit("stateSync", state);
     });
     this.rooms.set(roomId, room);
@@ -20,13 +20,33 @@ export class RoomManager {
     const normalizedRoomId = roomId.trim().toUpperCase();
     const room = this.rooms.get(normalizedRoomId);
     if (!room) {
-      return { ok: false, message: "Room not found" };
+      return { ok: false, message: "방을 찾을 수 없습니다." };
     }
     const playerId = room.addPlayer(socketId);
     if (playerId === undefined) {
-      return { ok: false, message: "Room is full" };
+      return { ok: false, message: "방이 가득 찼거나 이미 게임이 시작되었습니다." };
     }
     return { ok: true, roomId: normalizedRoomId, playerId, state: room.state };
+  }
+
+  addComputer(socketId: string, roomId: string | undefined, difficulty?: AIDifficulty) {
+    this.getRoom(roomId)?.addComputer(socketId, difficulty);
+  }
+
+  setPlayerName(socketId: string, roomId: string | undefined, name: string) {
+    this.getRoom(roomId)?.setPlayerName(socketId, name);
+  }
+
+  removeComputer(socketId: string, roomId: string | undefined, playerId: number) {
+    this.getRoom(roomId)?.removeComputer(socketId, playerId);
+  }
+
+  setTeam(socketId: string, roomId: string | undefined, playerId: number, teamId: "A" | "B" | "C" | "D") {
+    this.getRoom(roomId)?.setTeam(socketId, playerId, teamId);
+  }
+
+  startMatch(socketId: string, roomId: string | undefined) {
+    this.getRoom(roomId)?.startMatch(socketId);
   }
 
   getRoom(roomId?: string) {

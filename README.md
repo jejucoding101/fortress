@@ -26,10 +26,20 @@ VITE_SERVER_URL=http://YOUR_HOST_IP:3000 npm run dev:client
 ## Multiplayer
 
 - Click `방 만들기` on the first computer.
+- The host can add computer players before starting.
+- Use the team selectors to assign humans and computers to teams.
 - Share the four-letter room code.
 - Enter the room code on the second computer and click `입장`.
 - Only the active player can move, aim, and fire.
 - The server owns turn order, projectile simulation, terrain craters, damage, and victory state.
+
+## Single Player
+
+- Click `방 만들기`.
+- Click `컴퓨터 추가`.
+- Keep the human and computer on different teams.
+- Click `게임 시작`.
+- The computer player chooses targets, simulates angle/power candidates on the server, fires, and adjusts using previous shot memory.
 
 ## Controls
 
