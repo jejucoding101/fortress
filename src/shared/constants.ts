@@ -1,0 +1,14 @@
+export const WORLD_WIDTH = 960;
+export const WORLD_HEIGHT = 540;
+export const GRAVITY = 245;
+export const MAX_HP = 100;
+export const MIN_POWER = 14;
+export const MAX_POWER = 100;
+export const DEFAULT_TARGET_POWER = 55;
+export const MAX_MOVE = 100;
+export const MAX_PLAYERS = 7;
+export const MAX_CLIMB_STEP = 34;
+export const MAX_DRIVABLE_SLOPE = (Math.PI / 180) * 48;
+export const EXPLOSION_RADIUS = 36;
+export const SHOT_STEP_MS = 16;
+export const TEAM_IDS = ["A", "B", "C", "D"] as const;
