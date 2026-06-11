@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Red Tank Sprite Viewer</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: Arial, Helvetica, sans-serif;
+        background: #17191d;
+        color: #f3f5f7;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        padding: 28px;
+        background:
+          linear-gradient(135deg, rgba(62, 73, 88, 0.22), transparent 42%),
+          #17191d;
+      }
+
+      main {
+        width: min(1180px, 100%);
+        margin: 0 auto;
+      }
+
+      h1 {
+        margin: 0 0 18px;
+        font-size: 22px;
+        font-weight: 700;
+      }
+
+      .layout {
+        display: grid;
+        grid-template-columns: minmax(320px, 420px) 1fr;
+        gap: 22px;
+        align-items: start;
+      }
+
+      .panel {
+        border: 1px solid #303641;
+        border-radius: 8px;
+        background: #20242b;
+        padding: 18px;
+      }
+
+      .stage,
+      .frame,
+      .sheet-preview {
+        background-color: #eef0f3;
+        background-image:
+          linear-gradient(45deg, #d9dde4 25%, transparent 25%),
+          linear-gradient(-45deg, #d9dde4 25%, transparent 25%),
+          linear-gradient(45deg, transparent 75%, #d9dde4 75%),
+          linear-gradient(-45deg, transparent 75%, #d9dde4 75%);
+        background-position: 0 0, 0 12px, 12px -12px, -12px 0;
+        background-size: 24px 24px;
+      }
+
+      .stage {
+        display: grid;
+        place-items: center;
+        width: 100%;
+        aspect-ratio: 1;
+        border-radius: 8px;
+        overflow: hidden;
+      }
+
+      #sprite {
+        width: 86%;
+        height: 86%;
+        object-fit: contain;
+        image-rendering: pixelated;
+      }
+
+      .controls {
+        display: grid;
+        gap: 12px;
+        margin-top: 16px;
+      }
+
+      .button-row {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+
+      button,
+      select {
+        min-width: 84px;
+        border: 1px solid #455062;
+        border-radius: 6px;
+        background: #2b3340;
+        color: #f7f9fb;
+        font: inherit;
+        padding: 9px 12px;
+      }
+
+      button {
+        cursor: pointer;
+      }
+
+      button:hover,
+      select:hover {
+        background: #354052;
+      }
+
+      label {
+        display: grid;
+        gap: 7px;
+        color: #cbd2dc;
+        font-size: 13px;
+      }
+
+      input[type="range"],
+      select {
+        width: 100%;
+      }
+
+      .meta {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        color: #b5beca;
+        font-size: 13px;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 10px;
+      }
+
+      .frame {
+        display: grid;
+        place-items: center;
+        aspect-ratio: 1;
+        border: 1px solid #394150;
+        border-radius: 6px;
+        overflow: hidden;
+      }
+
+      .frame img {
+        width: 96%;
+        height: 96%;
+        object-fit: contain;
+        image-rendering: pixelated;
+      }
+
+      .sheet-preview {
+        margin-top: 18px;
+        border: 1px solid #394150;
+        border-radius: 8px;
+        overflow: hidden;
+      }
+
+      .sheet-preview img {
+        display: block;
+        width: 100%;
+        image-rendering: pixelated;
+      }
+
+      @media (max-width: 860px) {
+        body {
+          padding: 18px;
+        }
+
+        .layout {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Red Tank Sprite Viewer</h1>
+      <div class="layout">
+        <section class="panel">
+          <div class="stage">
+            <img id="sprite" src="public/assets/tanks/red-idle/red_idle_01.png" alt="red tank idle frame">
+          </div>
+          <div class="controls">
+            <label>
+              Action
+              <select id="actionSelect"></select>
+            </label>
+            <div class="button-row">
+              <button id="toggle" type="button">Pause</button>
+              <button id="prev" type="button">Prev</button>
+              <button id="next" type="button">Next</button>
+            </div>
+            <label>
+              FPS
+              <input id="fps" type="range" min="4" max="24" value="12">
+            </label>
+            <div class="meta">
+              <span id="frameLabel">Frame 1 / 16</span>
+              <span id="fpsLabel">12 fps</span>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div id="frameGrid" class="grid"></div>
+          <div class="sheet-preview">
+            <img id="sheet" src="public/assets/tanks/red-idle/red_tank_idle_4x4_transparent.png" alt="transparent 4x4 sprite sheet">
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <script>
+      const actions = [
+        {
+          id: "red-idle",
+          label: "Idle",
+          folder: "public/assets/tanks/red-idle",
+          prefix: "red_idle_",
+          sheet: "red_tank_idle_4x4_transparent.png",
+          frameCount: 16
+        },
+        {
+          id: "red-fire",
+          label: "Fire",
+          folder: "public/assets/tanks/red-fire",
+          prefix: "red_fire_",
+          sheet: "red_tank_fire_4x4_transparent.png",
+          frameCount: 16
+        }
+      ];
+
+      const sprite = document.querySelector("#sprite");
+      const actionSelect = document.querySelector("#actionSelect");
+      const toggle = document.querySelector("#toggle");
+      const prev = document.querySelector("#prev");
+      const next = document.querySelector("#next");
+      const fps = document.querySelector("#fps");
+      const frameLabel = document.querySelector("#frameLabel");
+      const fpsLabel = document.querySelector("#fpsLabel");
+      const frameGrid = document.querySelector("#frameGrid");
+      const sheet = document.querySelector("#sheet");
+
+      let frame = 0;
+      let playing = true;
+      let timer = null;
+      let action = actions[0];
+      let frames = [];
+
+      actions.forEach((item) => {
+        const option = document.createElement("option");
+        option.value = item.id;
+        option.textContent = item.label;
+        actionSelect.appendChild(option);
+      });
+
+      function buildFrames() {
+        frames = Array.from({ length: action.frameCount }, (_, index) =>
+          `${action.folder}/${action.prefix}${String(index + 1).padStart(2, "0")}.png`
+        );
+      }
+
+      function renderGrid() {
+        frameGrid.replaceChildren();
+        frames.forEach((src, index) => {
+          const cell = document.createElement("div");
+          cell.className = "frame";
+          const img = document.createElement("img");
+          img.src = src;
+          img.alt = `${action.label} frame ${index + 1}`;
+          cell.appendChild(img);
+          frameGrid.appendChild(cell);
+        });
+      }
+
+      function loadAction(id) {
+        action = actions.find((item) => item.id === id) || actions[0];
+        frame = 0;
+        buildFrames();
+        renderGrid();
+        sheet.src = `${action.folder}/${action.sheet}`;
+        sheet.alt = `${action.label} transparent 4x4 sprite sheet`;
+        render();
+      }
+
+      function render() {
+        sprite.src = frames[frame];
+        frameLabel.textContent = `${action.label} ${frame + 1} / ${action.frameCount}`;
+      }
+
+      function schedule() {
+        clearInterval(timer);
+        fpsLabel.textContent = `${fps.value} fps`;
+        if (playing) {
+          timer = setInterval(() => {
+            frame = (frame + 1) % action.frameCount;
+            render();
+          }, 1000 / Number(fps.value));
+        }
+      }
+
+      toggle.addEventListener("click", () => {
+        playing = !playing;
+        toggle.textContent = playing ? "Pause" : "Play";
+        schedule();
+      });
+
+      prev.addEventListener("click", () => {
+        frame = (frame - 1 + action.frameCount) % action.frameCount;
+        render();
+      });
+
+      next.addEventListener("click", () => {
+        frame = (frame + 1) % action.frameCount;
+        render();
+      });
+
+      actionSelect.addEventListener("change", () => {
+        loadAction(actionSelect.value);
+      });
+
+      fps.addEventListener("input", schedule);
+
+      loadAction(action.id);
+      schedule();
+    </script>
+  </body>
+</html>

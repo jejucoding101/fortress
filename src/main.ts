@@ -5,10 +5,12 @@ import {
   MAX_POWER,
   MIN_POWER,
   TEAM_IDS,
+  VIEWPORT_HEIGHT,
+  VIEWPORT_WIDTH,
   WORLD_HEIGHT,
   WORLD_WIDTH
 } from "./shared/constants.js";
-import { baseTerrainY, clamp } from "./shared/terrain.js";
+import { clamp, getGroundSurfaceY, getTerrainIslands } from "./shared/terrain.js";
 import type {
   ClientToServerEvents,
   GameState,
@@ -31,21 +33,31 @@ type Snowflake = {
   phase: number;
 };
 
+type TankView = {
+  root: Phaser.GameObjects.Container;
+  turret: Phaser.GameObjects.Rectangle;
+  nameLabel: Phaser.GameObjects.Text;
+  energyFrame: Phaser.GameObjects.Rectangle;
+  energyFill: Phaser.GameObjects.Rectangle;
+};
+
 let socket: Socket<ServerToClientEvents, ClientToServerEvents>;
 let localPlayerId: PlayerId | undefined;
 let currentState: GameState | undefined;
 let battleScene: BattleScene | undefined;
+let gameMenuLockedByGameOver = false;
 
 class BattleScene extends Phaser.Scene {
   private terrainCanvas!: HTMLCanvasElement;
   private terrainContext!: CanvasRenderingContext2D;
   private terrainTexture!: Phaser.Textures.CanvasTexture;
-  private tankViews: Phaser.GameObjects.Container[] = [];
+  private tankViews: TankView[] = [];
   private snowflakes: Snowflake[] = [];
   private projectile?: ProjectileView;
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private fireKey!: Phaser.Input.Keyboard.Key;
   private restartKey!: Phaser.Input.Keyboard.Key;
+  private menuKey!: Phaser.Input.Keyboard.Key;
   private statusText!: Phaser.GameObjects.Text;
   private powerTrack?: HTMLElement;
   private isChargingShot = false;
@@ -54,6 +66,11 @@ class BattleScene extends Phaser.Scene {
   private appliedCraterCount = 0;
   private lastMoveSend = 0;
   private lastAngleSend = 0;
+  private hoverEdgeDirection = 0;
+  private hoverEdgeStartTime = 0;
+  private previousPhase?: GameState["phase"];
+  private previousActivePlayerId?: PlayerId;
+  private appliedTerrainSeed?: number;
 
   constructor() {
     super("battle");
@@ -62,16 +79,18 @@ class BattleScene extends Phaser.Scene {
   create() {
     battleScene = this;
     this.cameras.main.setBackgroundColor("#78bde7");
+    this.cameras.main.setBounds(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
     this.createSky();
     this.createWeatherParticles();
-    this.createTerrain([]);
+    this.createTerrain([], currentState?.terrainSeed ?? 1);
     this.ensureTankViews(2);
 
     this.cursors = this.input.keyboard!.createCursorKeys();
     this.fireKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
     this.restartKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.R);
+    this.menuKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
     this.statusText = this.add
-      .text(WORLD_WIDTH / 2, 84, "Create or join a room", {
+      .text(VIEWPORT_WIDTH / 2, 84, "Create or join a room", {
         fontFamily: "Arial",
         fontSize: "22px",
         color: "#ffffff",
@@ -79,6 +98,7 @@ class BattleScene extends Phaser.Scene {
         strokeThickness: 5
       })
       .setOrigin(0.5)
+      .setScrollFactor(0)
       .setDepth(5);
 
     this.setupPowerMarkerControls();
@@ -93,10 +113,16 @@ class BattleScene extends Phaser.Scene {
       return;
     }
 
+    if (Phaser.Input.Keyboard.JustDown(this.menuKey)) {
+      toggleGameMenu();
+      return;
+    }
+
     if (this.canControl()) {
       this.updateNetworkInput(time, deltaMs / 1000);
     }
 
+    this.updateCamera(time, deltaMs / 1000);
     this.updateProjectile();
     this.updateWeatherParticles(deltaMs / 1000);
     this.refreshHud();
@@ -107,23 +133,36 @@ class BattleScene extends Phaser.Scene {
     currentState = state;
     updateLobbyState(state);
     this.ensureTankViews(state.players.length);
+    this.handleCameraStateTransition(state);
 
-    if (state.terrainHoles.length !== this.appliedCraterCount) {
+    if (
+      state.terrainSeed !== this.appliedTerrainSeed ||
+      state.terrainHoles.length !== this.appliedCraterCount
+    ) {
       const newHoles = state.terrainHoles.slice(this.appliedCraterCount);
-      this.createTerrain(state.terrainHoles);
-      newHoles.forEach((hole) => this.playExplosion(hole));
+      this.createTerrain(state.terrainHoles, state.terrainSeed);
+      if (state.terrainSeed === this.appliedTerrainSeed) {
+        newHoles.forEach((hole) => this.playExplosion(hole));
+      }
+      this.appliedTerrainSeed = state.terrainSeed;
       this.appliedCraterCount = state.terrainHoles.length;
     }
 
     state.players.forEach((player, index) => {
       const view = this.tankViews[index];
       if (!view) return;
-      view.setPosition(player.x, player.y);
-      view.setRotation(player.slope);
-      view.setAlpha(player.hp <= 0 ? 0.35 : player.id === state.activePlayerId ? 1 : 0.72);
-      const turret = view.list[1] as Phaser.GameObjects.Rectangle;
-      turret.rotation = Phaser.Math.DegToRad(-player.angle) - player.slope;
-      turret.setFillStyle(player.id === state.activePlayerId ? 0xf8fbff : 0x263342);
+      view.root.setPosition(player.x, player.y);
+      view.root.setRotation(player.slope);
+      view.root.setAlpha(player.hp <= 0 ? 0.35 : player.id === state.activePlayerId ? 1 : 0.72);
+      view.turret.rotation = Phaser.Math.DegToRad(-player.angle) - player.slope;
+      view.turret.setFillStyle(player.id === state.activePlayerId ? 0xf8fbff : 0x263342);
+      view.nameLabel.setText(player.name);
+      view.nameLabel.setRotation(-player.slope);
+      view.energyFrame.setRotation(-player.slope);
+      view.energyFill.setRotation(-player.slope);
+      view.energyFill.width = Phaser.Math.Clamp((player.hp / 100) * 44, 0, 44);
+      view.energyFill.x = -22 + view.energyFill.width / 2;
+      view.energyFill.setFillStyle(player.hp > 35 ? 0x8df05f : 0xffa33d);
     });
 
     if (state.phase !== "flying") {
@@ -133,6 +172,75 @@ class BattleScene extends Phaser.Scene {
 
     this.statusText.setText(this.getStatusMessage(state));
     this.refreshHud();
+    syncGameMenuToState(state);
+  }
+
+  private updateCamera(time: number, delta: number) {
+    if (!currentState) return;
+
+    if (currentState.phase === "flying" && currentState.projectile) {
+      const targetScrollX = Phaser.Math.Clamp(
+        currentState.projectile.x - VIEWPORT_WIDTH / 2,
+        0,
+        WORLD_WIDTH - VIEWPORT_WIDTH
+      );
+      this.cameras.main.scrollX = Phaser.Math.Linear(this.cameras.main.scrollX, targetScrollX, 0.18);
+      return;
+    }
+
+    if (currentState.phase !== "aim") {
+      this.hoverEdgeDirection = 0;
+      this.hoverEdgeStartTime = 0;
+      return;
+    }
+
+    const pointer = this.input.activePointer;
+    const edgeThreshold = 28;
+    const nextDirection =
+      pointer.x <= edgeThreshold ? -1 : pointer.x >= VIEWPORT_WIDTH - edgeThreshold ? 1 : 0;
+
+    if (nextDirection !== this.hoverEdgeDirection) {
+      this.hoverEdgeDirection = nextDirection;
+      this.hoverEdgeStartTime = nextDirection === 0 ? 0 : time;
+    }
+
+    if (!nextDirection || time - this.hoverEdgeStartTime < 250) {
+      return;
+    }
+
+    const scrollSpeed = 540;
+    const nextScrollX = this.cameras.main.scrollX + nextDirection * scrollSpeed * delta;
+    this.cameras.main.scrollX = Phaser.Math.Clamp(nextScrollX, 0, WORLD_WIDTH - VIEWPORT_WIDTH);
+  }
+
+  private handleCameraStateTransition(state: GameState) {
+    const phaseChanged = this.previousPhase !== state.phase;
+    const activePlayerChanged = this.previousActivePlayerId !== state.activePlayerId;
+
+    if ((phaseChanged && state.phase === "aim") || (state.phase === "aim" && activePlayerChanged)) {
+      const activePlayer = getActivePlayer(state);
+      if (activePlayer) {
+        this.centerCameraOnX(activePlayer.x);
+      }
+    }
+
+    if (phaseChanged && state.phase === "flying") {
+      const activePlayer = getActivePlayer(state);
+      if (activePlayer) {
+        this.centerCameraOnX(activePlayer.x);
+      }
+    }
+
+    this.previousPhase = state.phase;
+    this.previousActivePlayerId = state.activePlayerId;
+  }
+
+  private centerCameraOnX(targetX: number) {
+    this.cameras.main.scrollX = Phaser.Math.Clamp(
+      targetX - VIEWPORT_WIDTH / 2,
+      0,
+      WORLD_WIDTH - VIEWPORT_WIDTH
+    );
   }
 
   private updateNetworkInput(time: number, delta: number) {
@@ -235,7 +343,7 @@ class BattleScene extends Phaser.Scene {
     });
   }
 
-  private createTerrain(holes: TerrainCrater[]) {
+  private createTerrain(holes: TerrainCrater[], terrainSeed: number) {
     if (!this.terrainTexture) {
       const texture = this.textures.createCanvas("terrain", WORLD_WIDTH, WORLD_HEIGHT);
       if (!texture) throw new Error("Failed to create terrain texture.");
@@ -247,7 +355,7 @@ class BattleScene extends Phaser.Scene {
 
     const points: Array<{ x: number; y: number }> = [];
     for (let x = 0; x <= WORLD_WIDTH; x += 12) {
-      points.push({ x, y: baseTerrainY(x) });
+      points.push({ x, y: getGroundSurfaceY(x, terrainSeed) });
     }
 
     const ctx = this.terrainContext;
@@ -264,6 +372,23 @@ class BattleScene extends Phaser.Scene {
     soil.addColorStop(1, "#3f2c20");
     ctx.fillStyle = soil;
     ctx.fill();
+
+    getTerrainIslands(terrainSeed).forEach((island) => {
+      ctx.beginPath();
+      ctx.ellipse(island.x, island.y, island.radiusX, island.radiusY, 0, 0, Math.PI * 2);
+      ctx.fillStyle = "#5a8f36";
+      ctx.fill();
+
+      ctx.beginPath();
+      ctx.ellipse(island.x, island.y + 4, island.radiusX, island.radiusY - 6, 0, 0, Math.PI * 2);
+      const islandSoil = ctx.createLinearGradient(0, island.y - island.radiusY, 0, island.y + island.radiusY);
+      islandSoil.addColorStop(0, "#7cb147");
+      islandSoil.addColorStop(0.2, "#5e9937");
+      islandSoil.addColorStop(0.22, "#7d5a34");
+      islandSoil.addColorStop(1, "#3f2c20");
+      ctx.fillStyle = islandSoil;
+      ctx.fill();
+    });
 
     holes.forEach((hole) => {
       ctx.save();
@@ -291,12 +416,31 @@ class BattleScene extends Phaser.Scene {
       body.fillCircle(-10, 7, 3);
       body.fillCircle(10, 7, 3);
       const turret = this.add.rectangle(0, -14, 30, 6, 0x263342).setOrigin(0, 0.5);
-      container.add([body, turret]);
-      this.tankViews.push(container);
+      const nameLabel = this.add
+        .text(0, -34, `PLAYER ${index + 1}`, {
+          fontFamily: "Arial",
+          fontSize: "12px",
+          color: "#f8fbff",
+          stroke: "#0c1720",
+          strokeThickness: 3
+        })
+        .setOrigin(0.5, 1);
+      const energyFrame = this.add
+        .rectangle(0, 20, 48, 8, 0x0c1720, 0.85)
+        .setStrokeStyle(1, 0xf4fbff, 0.55);
+      const energyFill = this.add.rectangle(0, 20, 44, 4, 0x8df05f, 1);
+      container.add([nameLabel, body, turret, energyFrame, energyFill]);
+      this.tankViews.push({
+        root: container,
+        turret,
+        nameLabel,
+        energyFrame,
+        energyFill
+      });
     }
 
     this.tankViews.forEach((view, index) => {
-      view.setVisible(index < count);
+      view.root.setVisible(index < count);
     });
   }
 
@@ -409,6 +553,7 @@ class BattleScene extends Phaser.Scene {
 
   private canControl() {
     return (
+      !isGameMenuOpen() &&
       currentState?.phase === "aim" &&
       localPlayerId !== undefined &&
       currentState.activePlayerId === localPlayerId &&
@@ -439,8 +584,8 @@ class BattleScene extends Phaser.Scene {
 const config: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
   parent: "game",
-  width: WORLD_WIDTH,
-  height: WORLD_HEIGHT,
+  width: VIEWPORT_WIDTH,
+  height: VIEWPORT_HEIGHT,
   backgroundColor: "#101721",
   scale: {
     mode: Phaser.Scale.FIT,
@@ -489,6 +634,9 @@ function setupLobby() {
   const startMatchButton = document.querySelector<HTMLButtonElement>("#start-match")!;
   const nameInput = document.querySelector<HTMLInputElement>("#player-name")!;
   const saveNameButton = document.querySelector<HTMLButtonElement>("#save-name")!;
+  const resumeGameButton = document.querySelector<HTMLButtonElement>("#resume-game")!;
+  const restartGameButton = document.querySelector<HTMLButtonElement>("#restart-game")!;
+  const exitGameButton = document.querySelector<HTMLButtonElement>("#exit-game")!;
 
   createButton.addEventListener("click", () => {
     socket.emit("createRoom", applyJoinPayload);
@@ -523,6 +671,19 @@ function setupLobby() {
   nameInput.addEventListener("keydown", (event) => {
     if (event.key !== "Enter") return;
     saveNameButton.click();
+  });
+
+  resumeGameButton.addEventListener("click", () => {
+    closeGameMenu();
+  });
+
+  restartGameButton.addEventListener("click", () => {
+    closeGameMenu(true);
+    socket.emit("restartGame");
+  });
+
+  exitGameButton.addEventListener("click", () => {
+    window.location.reload();
   });
 }
 
@@ -584,6 +745,64 @@ function updateLobbyState(state: GameState) {
   const rightColumn = createTeamColumn("B", "오른쪽 편", state, isHost);
   slotList.append(leftColumn, rightColumn);
   setLobbyStatus(`방 번호 ${state.roomId} · 왼쪽/오른쪽 편을 정한 뒤 게임을 시작하세요.`);
+}
+
+function getGameMenuElements() {
+  return {
+    root: document.querySelector<HTMLElement>("#game-menu")!,
+    title: document.querySelector<HTMLElement>("#game-menu-title")!,
+    message: document.querySelector<HTMLElement>("#game-menu-message")!,
+    resume: document.querySelector<HTMLButtonElement>("#resume-game")!
+  };
+}
+
+function isGameMenuOpen() {
+  return !getGameMenuElements().root.classList.contains("hidden");
+}
+
+function openGameMenu(reason: "pause" | "gameover") {
+  const { root, title, message, resume } = getGameMenuElements();
+  gameMenuLockedByGameOver = reason === "gameover";
+  title.textContent = reason === "gameover" ? "게임 종료" : "게임 메뉴";
+  message.textContent =
+    reason === "gameover"
+      ? currentState?.message ?? "승패가 결정되었습니다."
+      : "계속 진행하거나 다시 시작할 수 있습니다.";
+  resume.style.display = reason === "gameover" ? "none" : "inline-block";
+  root.classList.remove("hidden");
+  root.setAttribute("aria-hidden", "false");
+}
+
+function closeGameMenu(force = false) {
+  if (gameMenuLockedByGameOver && !force) return;
+  const { root } = getGameMenuElements();
+  root.classList.add("hidden");
+  root.setAttribute("aria-hidden", "true");
+  gameMenuLockedByGameOver = false;
+}
+
+function toggleGameMenu() {
+  if (!currentState || currentState.phase === "waiting") return;
+  if (currentState.phase === "gameover") {
+    openGameMenu("gameover");
+    return;
+  }
+  if (isGameMenuOpen()) {
+    closeGameMenu();
+  } else {
+    openGameMenu("pause");
+  }
+}
+
+function syncGameMenuToState(state: GameState) {
+  if (state.phase === "gameover") {
+    openGameMenu("gameover");
+    return;
+  }
+
+  if (state.phase === "waiting" || state.phase === "aim" || state.phase === "flying") {
+    closeGameMenu(true);
+  }
 }
 
 function createSlotIndex(index: number) {

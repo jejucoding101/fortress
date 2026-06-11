@@ -1,0 +1,599 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>탱크 레이어 조합 뷰</title>
+    <style>
+      :root {
+        --bg-top: #fff7e9;
+        --bg-bottom: #c9e6ff;
+        --panel: rgba(255, 251, 245, 0.92);
+        --panel-border: #bb8851;
+        --ink: #39210f;
+        --accent: #cc6e37;
+        --accent-soft: #f1c085;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        min-height: 100%;
+        font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+        color: var(--ink);
+        background:
+          radial-gradient(circle at top, rgba(255, 255, 255, 0.8), transparent 28%),
+          linear-gradient(180deg, var(--bg-top), var(--bg-bottom));
+      }
+
+      body {
+        display: grid;
+        grid-template-columns: minmax(320px, 420px) 1fr;
+        gap: 18px;
+        padding: 18px;
+      }
+
+      .panel,
+      .stage-panel {
+        border: 2px solid var(--panel-border);
+        border-radius: 16px;
+        background: var(--panel);
+        box-shadow:
+          0 12px 30px rgba(53, 28, 10, 0.12),
+          inset 0 1px 0 rgba(255, 255, 255, 0.75);
+      }
+
+      .panel {
+        padding: 16px;
+        display: grid;
+        gap: 14px;
+        align-content: start;
+      }
+
+      h1,
+      h2,
+      p {
+        margin: 0;
+      }
+
+      h1 {
+        font-size: 28px;
+        line-height: 1.1;
+      }
+
+      .subtext {
+        color: rgba(57, 33, 15, 0.7);
+        font-size: 14px;
+        line-height: 1.5;
+      }
+
+      .toolbar,
+      .button-row {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+      }
+
+      button {
+        border: 1px solid #9a592d;
+        border-radius: 10px;
+        padding: 10px 12px;
+        background: linear-gradient(180deg, #ffd795, #e18b47);
+        color: #30180a;
+        font: inherit;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      button.secondary {
+        background: linear-gradient(180deg, #fff3e1, #efc794);
+      }
+
+      .group {
+        display: grid;
+        gap: 10px;
+        padding: 12px;
+        border: 1px solid rgba(154, 89, 45, 0.22);
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.62);
+      }
+
+      .group h2 {
+        font-size: 16px;
+      }
+
+      .control {
+        display: grid;
+        grid-template-columns: 90px 1fr 56px;
+        gap: 10px;
+        align-items: center;
+        font-size: 14px;
+      }
+
+      .control output {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+        color: rgba(57, 33, 15, 0.76);
+      }
+
+      input[type="range"] {
+        width: 100%;
+        accent-color: var(--accent);
+      }
+
+      .stage-panel {
+        position: relative;
+        overflow: hidden;
+        min-height: 720px;
+        padding: 18px;
+      }
+
+      .stage {
+        position: relative;
+        height: 100%;
+        min-height: 680px;
+        border-radius: 14px;
+        overflow: hidden;
+        background:
+          radial-gradient(circle at 20% 15%, rgba(255, 255, 255, 0.95), transparent 26%),
+          linear-gradient(180deg, #f5fbff 0%, #d9eefb 58%, #ccbe8e 58%, #856a46 100%);
+      }
+
+      .stage::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background-image:
+          linear-gradient(rgba(255, 255, 255, 0.12) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255, 255, 255, 0.12) 1px, transparent 1px);
+        background-size: 40px 40px;
+        pointer-events: none;
+      }
+
+      .ground-line {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 120px;
+        height: 4px;
+        background: rgba(53, 32, 16, 0.25);
+      }
+
+      .tank-rig {
+        position: absolute;
+        left: 50%;
+        bottom: 94px;
+        width: 980px;
+        height: 540px;
+        transform: translateX(-50%);
+      }
+
+      .body-layer,
+      .turret-layer {
+        position: absolute;
+        user-select: none;
+        -webkit-user-drag: none;
+        image-rendering: auto;
+      }
+
+      .body-layer {
+        left: 22px;
+        top: 118px;
+        width: 910px;
+      }
+
+      .turret-layer {
+        left: var(--turret-x, 320px);
+        top: var(--turret-y, 110px);
+        width: var(--turret-scale, 456px);
+        transform-origin: var(--turret-origin-x, 122px) var(--turret-origin-y, 258px);
+        transform: rotate(var(--turret-angle, -6deg)) translateX(var(--turret-recoil, 0px));
+        filter: drop-shadow(0 10px 10px rgba(31, 15, 8, 0.14));
+      }
+
+      .eye-layer {
+        position: absolute;
+        left: var(--eyes-x, 726px);
+        top: var(--eyes-y, 275px);
+        width: var(--eyes-width, 122px);
+        height: 58px;
+        display: var(--eyes-visible, none);
+        gap: 16px;
+        align-items: end;
+        justify-content: center;
+      }
+
+      .eye {
+        position: relative;
+        width: 52px;
+        height: 28px;
+        overflow: hidden;
+        border: 4px solid #1a120c;
+        border-top-width: 6px;
+        border-radius: 18px 18px 14px 14px;
+        background: #fbfbf4;
+        transform: skewX(-8deg) scaleY(var(--blink, 1));
+        transform-origin: center center;
+      }
+
+      .eye::after {
+        content: "";
+        position: absolute;
+        width: 18px;
+        height: 18px;
+        left: calc(16px + var(--pupil-x, 0px));
+        top: calc(4px + var(--pupil-y, 0px));
+        border-radius: 50%;
+        background:
+          radial-gradient(circle at 36% 36%, #ffffff 0 2px, transparent 3px),
+          #151515;
+      }
+
+      .eye.left {
+        transform: skewX(-10deg) scaleY(var(--blink, 1));
+      }
+
+      .eye.right {
+        transform: skewX(10deg) scaleY(var(--blink, 1));
+      }
+
+      .pivot-marker {
+        position: absolute;
+        left: calc(var(--turret-x, 320px) + var(--turret-origin-x, 122px) - 6px);
+        top: calc(var(--turret-y, 110px) + var(--turret-origin-y, 258px) - 6px);
+        width: 12px;
+        height: 12px;
+        border: 2px solid #1e8a8a;
+        border-radius: 50%;
+        background: rgba(150, 255, 240, 0.4);
+        pointer-events: none;
+      }
+
+      .pivot-marker::before,
+      .pivot-marker::after,
+      .mount-marker::before,
+      .mount-marker::after {
+        content: "";
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        background: currentColor;
+        transform: translate(-50%, -50%);
+      }
+
+      .pivot-marker::before,
+      .mount-marker::before {
+        width: 20px;
+        height: 2px;
+      }
+
+      .pivot-marker::after,
+      .mount-marker::after {
+        width: 2px;
+        height: 20px;
+      }
+
+      .pivot-marker.hidden {
+        display: none;
+      }
+
+      .mount-marker {
+        position: absolute;
+        left: var(--turret-x, 320px);
+        top: var(--turret-y, 110px);
+        width: 12px;
+        height: 12px;
+        color: #ff8a3d;
+        pointer-events: none;
+        transform: translate(-50%, -50%);
+        filter: drop-shadow(0 0 3px rgba(54, 28, 8, 0.55));
+      }
+
+      .mount-marker.hidden {
+        display: none;
+      }
+
+      .note {
+        font-size: 13px;
+        line-height: 1.45;
+        color: rgba(57, 33, 15, 0.76);
+      }
+
+      @media (max-width: 1100px) {
+        body {
+          grid-template-columns: 1fr;
+        }
+
+        .stage-panel {
+          min-height: 640px;
+        }
+
+        .tank-rig {
+          transform: translateX(-50%) scale(0.82);
+          transform-origin: center bottom;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <aside class="panel">
+      <div>
+        <h1>탱크 레이어 조합 뷰</h1>
+        <p class="subtext">
+          몸통과 포탑 파츠를 겹쳐 보면서 비율과 피벗을 조정하는 프리뷰입니다. 여기서
+          맞춘 값은 나중에 Phaser 레이어 탱크 뷰의 기준값으로 옮기기 좋습니다.
+        </p>
+      </div>
+
+      <div class="toolbar">
+        <button id="idle-sweep">포신 스윕</button>
+        <button id="fire-recoil">발사 반동</button>
+        <button id="blink-eyes" class="secondary">눈 깜빡임</button>
+        <button id="look-around" class="secondary">시선 이동</button>
+      </div>
+
+      <section class="group">
+        <h2>포탑 위치</h2>
+        <label class="control">
+          <span>X</span>
+          <input id="turret-x" type="range" min="220" max="520" value="320" />
+          <output for="turret-x">320</output>
+        </label>
+        <label class="control">
+          <span>Y</span>
+          <input id="turret-y" type="range" min="20" max="220" value="110" />
+          <output for="turret-y">110</output>
+        </label>
+        <label class="control">
+          <span>크기</span>
+          <input id="turret-scale" type="range" min="260" max="620" value="456" />
+          <output for="turret-scale">456</output>
+        </label>
+        <label class="control">
+          <span>각도</span>
+          <input id="turret-angle" type="range" min="-38" max="24" value="-6" />
+          <output for="turret-angle">-6</output>
+        </label>
+      </section>
+
+      <section class="group">
+        <h2>포탑 피벗</h2>
+        <label class="control">
+          <span>원점 X</span>
+          <input id="turret-origin-x" type="range" min="40" max="220" value="122" />
+          <output for="turret-origin-x">122</output>
+        </label>
+        <label class="control">
+          <span>원점 Y</span>
+          <input id="turret-origin-y" type="range" min="140" max="360" value="258" />
+          <output for="turret-origin-y">258</output>
+        </label>
+        <div class="button-row">
+          <button id="toggle-pivot" class="secondary">피벗 표시</button>
+          <button id="reset-all" class="secondary">기본값 복원</button>
+        </div>
+      </section>
+
+      <section class="group">
+        <h2>눈 Placeholder</h2>
+        <label class="control">
+          <span>표시</span>
+          <input id="eyes-visible" type="range" min="0" max="1" value="0" />
+          <output for="eyes-visible">꺼짐</output>
+        </label>
+        <label class="control">
+          <span>X</span>
+          <input id="eyes-x" type="range" min="620" max="820" value="726" />
+          <output for="eyes-x">726</output>
+        </label>
+        <label class="control">
+          <span>Y</span>
+          <input id="eyes-y" type="range" min="210" max="360" value="275" />
+          <output for="eyes-y">275</output>
+        </label>
+        <label class="control">
+          <span>너비</span>
+          <input id="eyes-width" type="range" min="80" max="180" value="122" />
+          <output for="eyes-width">122</output>
+        </label>
+      </section>
+
+      <p class="note">
+        현재 눈 이미지는 제외하고 CSS placeholder를 넣어 두었습니다. 나중에 실제 눈 파츠가
+        나오면 이 레이어만 이미지로 교체하면 됩니다.
+      </p>
+    </aside>
+
+    <main class="stage-panel">
+      <div class="stage">
+        <div class="ground-line"></div>
+        <div class="tank-rig" id="tank-rig">
+          <img
+            class="body-layer"
+            src="../assets/tanks/rust-red-layers/body_side.png"
+            alt="탱크 몸통"
+          />
+          <img
+            class="turret-layer"
+            id="turret-layer"
+            src="../assets/tanks/rust-red-layers/turret_side_round.png"
+            alt="탱크 포탑"
+          />
+          <div class="eye-layer" id="eye-layer">
+            <div class="eye left"></div>
+            <div class="eye right"></div>
+          </div>
+          <div class="mount-marker hidden" id="mount-marker"></div>
+          <div class="pivot-marker hidden" id="pivot-marker"></div>
+        </div>
+      </div>
+    </main>
+
+    <script>
+      const tankRig = document.getElementById("tank-rig");
+      const eyeLayer = document.getElementById("eye-layer");
+      const pivotMarker = document.getElementById("pivot-marker");
+      const mountMarker = document.getElementById("mount-marker");
+
+      const defaults = {
+        "turret-x": 320,
+        "turret-y": 110,
+        "turret-scale": 456,
+        "turret-angle": -6,
+        "turret-origin-x": 122,
+        "turret-origin-y": 258,
+        "eyes-visible": 0,
+        "eyes-x": 726,
+        "eyes-y": 275,
+        "eyes-width": 122
+      };
+
+      const controls = Object.fromEntries(
+        Object.keys(defaults).map((id) => [id, document.getElementById(id)])
+      );
+
+      const outputs = new Map(
+        Object.keys(defaults).map((id) => [id, document.querySelector(`output[for="${id}"]`)])
+      );
+
+      let sweepTimer = null;
+      let lookTimer = null;
+
+      function setVar(name, value, unit = "px") {
+        tankRig.style.setProperty(name, `${value}${unit}`);
+      }
+
+      function render() {
+        setVar("--turret-x", controls["turret-x"].value);
+        setVar("--turret-y", controls["turret-y"].value);
+        setVar("--turret-scale", controls["turret-scale"].value);
+        setVar("--turret-angle", controls["turret-angle"].value, "deg");
+        setVar("--turret-origin-x", controls["turret-origin-x"].value);
+        setVar("--turret-origin-y", controls["turret-origin-y"].value);
+        setVar("--eyes-x", controls["eyes-x"].value);
+        setVar("--eyes-y", controls["eyes-y"].value);
+        setVar("--eyes-width", controls["eyes-width"].value);
+
+        const eyesOn = Number(controls["eyes-visible"].value) === 1;
+        tankRig.style.setProperty("--eyes-visible", eyesOn ? "flex" : "none");
+
+        outputs.forEach((output, id) => {
+          if (!output) return;
+          if (id === "eyes-visible") {
+            output.textContent = Number(controls[id].value) === 1 ? "켜짐" : "꺼짐";
+            return;
+          }
+          output.textContent = controls[id].value;
+        });
+      }
+
+      function blinkEyes() {
+        if (Number(controls["eyes-visible"].value) !== 1) {
+          controls["eyes-visible"].value = "1";
+          render();
+        }
+
+        tankRig.style.setProperty("--blink", "0.08");
+        setTimeout(() => {
+          tankRig.style.setProperty("--blink", "1");
+        }, 140);
+      }
+
+      function lookAround() {
+        if (lookTimer) {
+          clearTimeout(lookTimer);
+          lookTimer = null;
+        }
+
+        if (Number(controls["eyes-visible"].value) !== 1) {
+          controls["eyes-visible"].value = "1";
+          render();
+        }
+
+        const steps = [
+          ["-4px", "0px"],
+          ["6px", "-1px"],
+          ["2px", "2px"],
+          ["-2px", "1px"],
+          ["0px", "0px"]
+        ];
+
+        let index = 0;
+        const next = () => {
+          const [x, y] = steps[index];
+          tankRig.style.setProperty("--pupil-x", x);
+          tankRig.style.setProperty("--pupil-y", y);
+          index += 1;
+          if (index < steps.length) {
+            lookTimer = setTimeout(next, 180);
+          }
+        };
+
+        next();
+      }
+
+      function fireRecoil() {
+        tankRig.style.setProperty("--turret-recoil", "-20px");
+        setTimeout(() => {
+          tankRig.style.setProperty("--turret-recoil", "8px");
+          setTimeout(() => {
+            tankRig.style.setProperty("--turret-recoil", "0px");
+          }, 90);
+        }, 80);
+      }
+
+      function runSweep() {
+        if (sweepTimer) {
+          clearInterval(sweepTimer);
+          sweepTimer = null;
+          return;
+        }
+
+        let time = 0;
+        const base = Number(controls["turret-angle"].value);
+        sweepTimer = setInterval(() => {
+          time += 0.08;
+          const angle = base + Math.sin(time) * 12;
+          tankRig.style.setProperty("--turret-angle", `${angle.toFixed(2)}deg`);
+        }, 16);
+
+        setTimeout(() => {
+          if (!sweepTimer) return;
+          clearInterval(sweepTimer);
+          sweepTimer = null;
+          render();
+        }, 3200);
+      }
+
+      document.getElementById("idle-sweep").addEventListener("click", runSweep);
+      document.getElementById("fire-recoil").addEventListener("click", fireRecoil);
+      document.getElementById("blink-eyes").addEventListener("click", blinkEyes);
+      document.getElementById("look-around").addEventListener("click", lookAround);
+      document.getElementById("toggle-pivot").addEventListener("click", () => {
+        pivotMarker.classList.toggle("hidden");
+        mountMarker.classList.toggle("hidden");
+      });
+
+      document.getElementById("reset-all").addEventListener("click", () => {
+        Object.entries(defaults).forEach(([id, value]) => {
+          controls[id].value = String(value);
+        });
+        tankRig.style.setProperty("--turret-recoil", "0px");
+        tankRig.style.setProperty("--blink", "1");
+        tankRig.style.setProperty("--pupil-x", "0px");
+        tankRig.style.setProperty("--pupil-y", "0px");
+        render();
+      });
+
+      Object.values(controls).forEach((control) => {
+        control.addEventListener("input", render);
+      });
+
+      render();
+    </script>
+  </body>
+</html>

@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "concurrently \"npm:dev:server\" \"npm:dev:client\"",
+    "dev": "concurrently --kill-others-on-fail --names server,client \"tsx server/index.ts\" \"vite --host 0.0.0.0 --port 5173\"",
     "dev:client": "vite --host 0.0.0.0 --port 5173",
     "dev:server": "tsx server/index.ts",
     "build": "tsc && vite build --emptyOutDir false --minify false",

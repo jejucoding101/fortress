@@ -56,6 +56,7 @@ export type GameState = {
   phase: GamePhase;
   activePlayerId: PlayerId;
   wind: number;
+  terrainSeed: number;
   players: PlayerState[];
   terrainHoles: TerrainCrater[];
   projectile?: ProjectileState;

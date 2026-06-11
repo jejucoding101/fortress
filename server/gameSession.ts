@@ -7,12 +7,20 @@ import {
   MAX_PLAYERS,
   MAX_POWER,
   MIN_POWER,
+  SHOT_BASE_SPEED,
+  SHOT_POWER_SCALE,
   SHOT_STEP_MS,
   TEAM_IDS,
   WORLD_HEIGHT,
   WORLD_WIDTH
 } from "../src/shared/constants.js";
-import { clamp, findGroundSlope, findGroundY, isSolidTerrainAt } from "../src/shared/terrain.js";
+import {
+  clamp,
+  findGroundSlope,
+  findGroundY,
+  getGroundSurfaceY,
+  isSolidTerrainAt
+} from "../src/shared/terrain.js";
 import type {
   AIDifficulty,
   GameState,
@@ -31,23 +39,23 @@ type SimulatedShot = {
   score: number;
 };
 
-const SPAWN_X = [120, 840, 245, 715, 365, 590, 480];
-const LEFT_SPAWN_X = [120, 215, 310, 405, 500, 595, 690];
-const RIGHT_SPAWN_X = [840, 745, 650, 555, 460, 365, 270];
 const PLAYER_COLORS = [0x45c7ff, 0xff9152, 0x9cff5a, 0xf36bff, 0xffdb4f, 0x6affd3, 0xd7d7e8];
 
 export class GameSession {
   readonly roomId: string;
   private broadcast: Broadcast;
   private interval?: NodeJS.Timeout;
+  private physicsInterval?: NodeJS.Timeout;
   private aiTimeout?: NodeJS.Timeout;
   private nextPlayerId = 0;
+  private fallVelocity = new Map<PlayerId, number>();
   state: GameState;
 
   constructor(roomId: string, hostSocketId: string, broadcast: Broadcast) {
     this.roomId = roomId;
     this.broadcast = broadcast;
     this.state = this.createInitialState(hostSocketId);
+    this.startPhysicsLoop();
   }
 
   addPlayer(socketId: string) {
@@ -182,7 +190,7 @@ export class GameSession {
     const player = this.currentPlayer;
     const shotPower = clamp(power, MIN_POWER, MAX_POWER);
     const radians = (player.angle / 180) * Math.PI;
-    const speed = 130 + shotPower * 4.9;
+    const speed = getShotSpeed(shotPower);
     const projectile = {
       x: player.x + Math.cos(radians) * 34,
       y: player.y - 16 - Math.sin(radians) * 34,
@@ -219,7 +227,10 @@ export class GameSession {
         return;
       }
 
-      if (projectile.y > 0 && isSolidTerrainAt(projectile.x, projectile.y, this.state.terrainHoles)) {
+      if (
+        projectile.y > 0 &&
+        isSolidTerrainAt(projectile.x, projectile.y, this.state.terrainHoles, this.state.terrainSeed)
+      ) {
         this.explodeAt(projectile.x, projectile.y);
         return;
       }
@@ -310,7 +321,7 @@ export class GameSession {
 
   private simulateShot(player: PlayerState, angle: number, power: number, target: PlayerState): SimulatedShot {
     const radians = (angle / 180) * Math.PI;
-    const speed = 130 + power * 4.9;
+    const speed = getShotSpeed(power);
     let x = player.x + Math.cos(radians) * 34;
     let y = player.y - 16 - Math.sin(radians) * 34;
     let vx = Math.cos(radians) * speed;
@@ -326,7 +337,7 @@ export class GameSession {
       y += vy * delta;
 
       if (x < -40 || x > WORLD_WIDTH + 40 || y > WORLD_HEIGHT + 40) break;
-      if (y > 0 && isSolidTerrainAt(x, y, this.state.terrainHoles)) break;
+      if (y > 0 && isSolidTerrainAt(x, y, this.state.terrainHoles, this.state.terrainSeed)) break;
     }
 
     const targetDistance = Math.hypot(x - target.x, y - (target.y - 8));
@@ -381,7 +392,11 @@ export class GameSession {
         const damage = Math.round(lerp(44, 8, distance / (EXPLOSION_RADIUS * 2.25)));
         player.hp = clamp(player.hp - damage, 0, MAX_HP);
       }
-      this.snapPlayerToGround(player);
+      if (player.hp > 0 && !this.hasSupportBelow(player)) {
+        this.fallVelocity.set(player.id, Math.max(this.fallVelocity.get(player.id) ?? 0, 46));
+      } else {
+        this.snapPlayerToGround(player);
+      }
     });
 
     if (shooter.kind === "computer" && targetBeforeExplosion) {
@@ -404,6 +419,11 @@ export class GameSession {
   private finishShot(impactX?: number, impactY?: number) {
     this.stopShot();
     this.state.projectile = undefined;
+
+    if (this.finishGameIfNeeded()) {
+      this.sync();
+      return;
+    }
 
     const winnerTeamId = this.getWinnerTeamId();
     if (winnerTeamId) {
@@ -456,15 +476,15 @@ export class GameSession {
       return false;
     }
 
-    const targetGround = findGroundY(targetX, this.state.terrainHoles);
-    const currentGround = findGroundY(player.x, this.state.terrainHoles);
+    const targetGround = findGroundY(targetX, this.state.terrainHoles, this.state.terrainSeed);
+    const currentGround = findGroundY(player.x, this.state.terrainHoles, this.state.terrainSeed);
     if (targetGround > WORLD_HEIGHT) return false;
     if (Math.abs(targetGround - currentGround) > MAX_CLIMB_STEP) return false;
 
     const bodyClear =
-      !isSolidTerrainAt(targetX - 15, targetGround - 20, this.state.terrainHoles) &&
-      !isSolidTerrainAt(targetX + 15, targetGround - 20, this.state.terrainHoles) &&
-      !isSolidTerrainAt(targetX, targetGround - 34, this.state.terrainHoles);
+      !isSolidTerrainAt(targetX - 15, targetGround - 20, this.state.terrainHoles, this.state.terrainSeed) &&
+      !isSolidTerrainAt(targetX + 15, targetGround - 20, this.state.terrainHoles, this.state.terrainSeed) &&
+      !isSolidTerrainAt(targetX, targetGround - 34, this.state.terrainHoles, this.state.terrainSeed);
 
     if (!bodyClear) return false;
     player.x = targetX;
@@ -480,6 +500,7 @@ export class GameSession {
   private canAct(socketId: string) {
     return (
       this.state.phase === "aim" &&
+      !this.isAnyPlayerFalling() &&
       this.currentPlayer.kind === "human" &&
       this.currentPlayer.socketId === socketId
     );
@@ -500,6 +521,7 @@ export class GameSession {
       phase: "waiting",
       activePlayerId: 0,
       wind: randomWind(),
+      terrainSeed: randomTerrainSeed(),
       players: [],
       terrainHoles: [],
       message: "편을 나누고 게임을 시작하세요."
@@ -512,6 +534,7 @@ export class GameSession {
     this.nextPlayerId += 1;
     const slotIndex = this.state.players.length;
     const teamId = (slotIndex === 0 ? "A" : "B") as TeamId;
+    const spawnX = randomSpawnX(this.state.terrainSeed);
     const player: PlayerState = {
       id,
       slotIndex,
@@ -521,10 +544,10 @@ export class GameSession {
       color: PLAYER_COLORS[slotIndex % PLAYER_COLORS.length],
       socketId,
       connected: kind === "computer" || Boolean(socketId),
-      x: SPAWN_X[slotIndex % SPAWN_X.length],
+      x: spawnX,
       y: 0,
       slope: 0,
-      angle: SPAWN_X[slotIndex % SPAWN_X.length] <= WORLD_WIDTH / 2 ? 45 : 135,
+      angle: spawnX <= WORLD_WIDTH / 2 ? 45 : 135,
       power: MIN_POWER,
       move: MAX_MOVE,
       hp: MAX_HP,
@@ -543,18 +566,18 @@ export class GameSession {
   private resetCombatState() {
     this.stopShot();
     this.clearAI();
+    this.fallVelocity.clear();
     this.state.terrainHoles = [];
     this.state.projectile = undefined;
     this.state.winnerId = undefined;
     this.state.winnerTeamId = undefined;
     this.state.lastShotPower = undefined;
     this.state.wind = randomWind();
-    const sideCounts = new Map<TeamId, number>();
+    this.state.terrainSeed = randomTerrainSeed();
+    const spawnXs = createRandomSpawnXs(this.state.players.length, this.state.terrainSeed);
     this.state.players.forEach((player, index) => {
       player.slotIndex = index;
-      const sideIndex = sideCounts.get(player.teamId) ?? 0;
-      sideCounts.set(player.teamId, sideIndex + 1);
-      player.x = getSpawnXForTeam(player.teamId, sideIndex, index);
+      player.x = spawnXs[index] ?? randomSpawnX(this.state.terrainSeed);
       player.angle = player.x <= WORLD_WIDTH / 2 ? 45 : 135;
       player.power = MIN_POWER;
       player.move = MAX_MOVE;
@@ -564,12 +587,91 @@ export class GameSession {
   }
 
   private snapPlayerToGround(player: PlayerState, holes = this.state.terrainHoles) {
-    const ground = findGroundY(player.x, holes);
+    const ground = findGroundY(player.x, holes, this.state.terrainSeed);
     player.y = ground - 8;
-    player.slope = findGroundSlope(player.x, holes);
+    player.slope = findGroundSlope(player.x, holes, this.state.terrainSeed);
     if (player.y > WORLD_HEIGHT - 20) {
       player.hp = 0;
     }
+  }
+
+  private startPhysicsLoop() {
+    this.physicsInterval = setInterval(() => this.updateFallingPlayers(), SHOT_STEP_MS);
+  }
+
+  private updateFallingPlayers() {
+    if (this.state.phase === "waiting" || this.state.phase === "gameover") return;
+
+    let changed = false;
+    let activePlayerFellOut = false;
+
+    this.state.players.forEach((player) => {
+      if (player.hp <= 0) return;
+
+      const currentlyFalling = this.fallVelocity.has(player.id);
+      const supported = this.hasSupportBelow(player);
+      if (!supported && !currentlyFalling) {
+        this.fallVelocity.set(player.id, 0);
+      }
+
+      const velocity = this.fallVelocity.get(player.id);
+      if (velocity === undefined) return;
+
+      const nextVelocity = Math.min(velocity + GRAVITY * (SHOT_STEP_MS / 1000), 420);
+      player.y += nextVelocity * (SHOT_STEP_MS / 1000);
+      player.slope = 0;
+      this.fallVelocity.set(player.id, nextVelocity);
+      changed = true;
+
+      if (player.y >= WORLD_HEIGHT + 28) {
+        player.hp = 0;
+        this.fallVelocity.delete(player.id);
+        if (player.id === this.state.activePlayerId) {
+          activePlayerFellOut = true;
+        }
+        return;
+      }
+
+      if (this.hasSupportBelow(player)) {
+        this.fallVelocity.delete(player.id);
+        this.snapPlayerToGround(player);
+      }
+    });
+
+    if (!changed) return;
+
+    if (this.finishGameIfNeeded()) {
+      this.sync();
+      return;
+    }
+
+    if (activePlayerFellOut && this.state.phase !== "flying") {
+      this.advanceTurn();
+    }
+
+    this.sync(false);
+  }
+
+  private hasSupportBelow(player: PlayerState) {
+    const supportOffsets = [-14, 0, 14];
+    return supportOffsets.some((offset) =>
+      isSolidTerrainAt(player.x + offset, player.y + 10, this.state.terrainHoles, this.state.terrainSeed)
+    );
+  }
+
+  private isAnyPlayerFalling() {
+    return this.fallVelocity.size > 0;
+  }
+
+  private finishGameIfNeeded() {
+    const winnerTeamId = this.getWinnerTeamId();
+    if (!winnerTeamId) return false;
+    this.state.phase = "gameover";
+    this.state.winnerTeamId = winnerTeamId;
+    this.state.winnerId =
+      this.state.players.find((player) => player.teamId === winnerTeamId && player.hp > 0)?.id;
+    this.state.message = `${winnerTeamId}팀 승리`;
+    return true;
   }
 
   private getWinnerTeamId() {
@@ -622,12 +724,75 @@ function randomWind() {
   return Math.random() * 3.6 - 1.8;
 }
 
-function getSpawnXForTeam(teamId: TeamId, sideIndex: number, fallbackIndex: number) {
-  if (teamId === "A") return LEFT_SPAWN_X[sideIndex % LEFT_SPAWN_X.length];
-  if (teamId === "B") return RIGHT_SPAWN_X[sideIndex % RIGHT_SPAWN_X.length];
-  return SPAWN_X[fallbackIndex % SPAWN_X.length];
+function randomTerrainSeed() {
+  return Math.floor(Math.random() * 2147483647);
+}
+
+function getShotSpeed(power: number) {
+  return SHOT_BASE_SPEED + clamp(power, MIN_POWER, MAX_POWER) * SHOT_POWER_SCALE;
+}
+
+function randomSpawnX(terrainSeed: number) {
+  for (let attempt = 0; attempt < 80; attempt += 1) {
+    const candidate = Math.round(PhasedRandom.between(96, WORLD_WIDTH - 96));
+    const ground = getGroundSurfaceY(candidate, terrainSeed);
+    if (ground < WORLD_HEIGHT - 32) return candidate;
+  }
+  return Math.round(WORLD_WIDTH / 2);
+}
+
+function createRandomSpawnXs(count: number, terrainSeed: number) {
+  if (count <= 0) return [];
+
+  const minSpacing = Math.max(120, Math.floor(WORLD_WIDTH / (count + 4)));
+  const requiredSpread = Math.max(560, VIEWPORT_SAFE_SPREAD);
+
+  for (let attempt = 0; attempt < 240; attempt += 1) {
+    const xs: number[] = [];
+
+    while (xs.length < count) {
+      const candidate = randomSpawnX(terrainSeed);
+      const ground = getGroundSurfaceY(candidate, terrainSeed);
+      const safeForSpawn = ground >= 184 && ground <= WORLD_HEIGHT - 34;
+      if (safeForSpawn && xs.every((x) => Math.abs(x - candidate) >= minSpacing)) {
+        xs.push(candidate);
+      }
+    }
+
+    xs.sort((a, b) => a - b);
+    if (xs[xs.length - 1] - xs[0] >= requiredSpread) {
+      return shuffle(xs);
+    }
+  }
+
+  const fallback: number[] = [];
+  const start = 110;
+  const end = WORLD_WIDTH - 110;
+  if (count === 1) return [Math.round((start + end) / 2)];
+  for (let index = 0; index < count; index += 1) {
+    const t = index / (count - 1);
+    fallback.push(Math.round(start + (end - start) * t));
+  }
+  return shuffle(fallback);
+}
+
+function shuffle<T>(items: T[]) {
+  const copy = [...items];
+  for (let index = copy.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [copy[index], copy[swapIndex]] = [copy[swapIndex], copy[index]];
+  }
+  return copy;
 }
 
 function lerp(a: number, b: number, t: number) {
   return a + (b - a) * clamp(t, 0, 1);
 }
+
+const VIEWPORT_SAFE_SPREAD = 640;
+
+const PhasedRandom = {
+  between(min: number, max: number) {
+    return Math.random() * (max - min) + min;
+  }
+};
