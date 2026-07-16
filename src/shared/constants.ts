@@ -16,4 +16,5 @@ export const EXPLOSION_RADIUS = 36;
 export const SHOT_STEP_MS = 16;
 export const SHOT_BASE_SPEED = 165;
 export const SHOT_POWER_SCALE = 5.35;
+export const TURN_DURATION_MS = 20_000;
 export const TEAM_IDS = ["A", "B", "C", "D"] as const;

@@ -1,19 +1,21 @@
 import {
-  EXPLOSION_RADIUS,
   GRAVITY,
   MAX_CLIMB_STEP,
-  MAX_HP,
-  MAX_MOVE,
   MAX_PLAYERS,
   MAX_POWER,
   MIN_POWER,
-  SHOT_BASE_SPEED,
-  SHOT_POWER_SCALE,
   SHOT_STEP_MS,
   TEAM_IDS,
+  TURN_DURATION_MS,
   WORLD_HEIGHT,
   WORLD_WIDTH
 } from "../src/shared/constants.js";
+import {
+  getDefaultInventory,
+  getTankDefinition,
+  getWeaponDefinition,
+  PLAYABLE_TANK_IDS
+} from "../src/shared/gameData.js";
 import {
   clamp,
   findGroundSlope,
@@ -26,8 +28,10 @@ import type {
   GameState,
   PlayerId,
   PlayerState,
+  TankId,
   TeamId,
-  TerrainCrater
+  TerrainCrater,
+  WeaponDefinition
 } from "../src/shared/types.js";
 
 type Broadcast = (state: GameState) => void;
@@ -47,6 +51,7 @@ export class GameSession {
   private interval?: NodeJS.Timeout;
   private physicsInterval?: NodeJS.Timeout;
   private aiTimeout?: NodeJS.Timeout;
+  private turnTimeout?: NodeJS.Timeout;
   private nextPlayerId = 0;
   private fallVelocity = new Map<PlayerId, number>();
   state: GameState;
@@ -117,6 +122,37 @@ export class GameSession {
     this.sync();
   }
 
+  setTank(socketId: string, playerId: PlayerId, tankId: TankId) {
+    const player = this.state.players.find((item) => item.id === playerId);
+    if (!player || this.state.phase !== "waiting") return;
+    if (player.kind !== "human") return;
+
+    const ownsHumanSlot = player.socketId === socketId;
+    if (!ownsHumanSlot && !this.isHost(socketId)) return;
+    if (!this.isPlayableTankId(tankId)) return;
+
+    this.applyTankToPlayer(player, tankId);
+    this.state.message = `${player.name} 캐릭터 선택`;
+    this.sync();
+  }
+
+  randomizeComputerTanks(socketId: string) {
+    if (!this.isHost(socketId) || this.state.phase !== "waiting") {
+      return { ok: false, message: "방장만 게임을 시작할 수 있습니다." };
+    }
+    if (!this.canStartMatch()) {
+      return { ok: false, message: "게임을 시작하려면 두 편이 필요합니다." };
+    }
+
+    this.state.players.forEach((player) => {
+      if (player.kind !== "computer") return;
+      this.applyTankToPlayer(player, this.getRandomTankId());
+    });
+    this.state.message = "컴퓨터 캐릭터 랜덤 배정";
+    this.sync(false);
+    return { ok: true };
+  }
+
   startMatch(socketId: string) {
     if (!this.isHost(socketId) || this.state.phase !== "waiting") return;
     if (!this.canStartMatch()) {
@@ -127,6 +163,7 @@ export class GameSession {
     this.resetCombatState();
     this.state.phase = "aim";
     this.state.activePlayerId = this.state.players.find((player) => player.hp > 0)!.id;
+    this.startTurnTimer();
       this.state.message = `${this.currentPlayer.name} 턴`;
     this.sync();
   }
@@ -153,6 +190,7 @@ export class GameSession {
     if (!this.isHost(socketId) && !this.getPlayerBySocket(socketId)) return;
     this.stopShot();
     this.clearAI();
+    this.clearTurnTimer();
     if (!this.canStartMatch()) {
       this.state.phase = "waiting";
       this.state.message = "게임을 시작하려면 두 편이 필요합니다.";
@@ -162,12 +200,14 @@ export class GameSession {
     this.resetCombatState();
     this.state.phase = "aim";
     this.state.activePlayerId = this.state.players.find((player) => player.hp > 0)!.id;
+    this.startTurnTimer();
     this.state.message = `${this.currentPlayer.name} 턴`;
     this.sync();
   }
 
   move(socketId: string, direction: -1 | 1) {
     if (!this.canAct(socketId)) return;
+    this.turnPlayer(this.currentPlayer, direction);
     this.tryMovePlayer(this.currentPlayer, direction * Math.min(3.2, this.currentPlayer.move));
     this.sync();
   }
@@ -175,7 +215,7 @@ export class GameSession {
   setAngle(socketId: string, direction: -1 | 1) {
     if (!this.canAct(socketId)) return;
     const player = this.currentPlayer;
-    const angleDirection = player.x <= WORLD_WIDTH / 2 ? 1 : -1;
+    const angleDirection = player.facing === 1 ? 1 : -1;
     player.angle += direction * angleDirection * 2.2;
     this.clampPlayerAngle(player);
     this.sync();
@@ -187,10 +227,13 @@ export class GameSession {
   }
 
   private fireCurrentPlayer(power: number) {
+    this.clearTurnTimer();
     const player = this.currentPlayer;
+    this.syncFacingToAngle(player);
+    const weapon = this.getSelectedWeapon(player);
     const shotPower = clamp(power, MIN_POWER, MAX_POWER);
     const radians = (player.angle / 180) * Math.PI;
-    const speed = getShotSpeed(shotPower);
+    const speed = getShotSpeed(shotPower, weapon);
     const projectile = {
       x: player.x + Math.cos(radians) * 34,
       y: player.y - 16 - Math.sin(radians) * 34,
@@ -201,20 +244,21 @@ export class GameSession {
 
     player.power = shotPower;
     this.state.lastShotPower = shotPower;
+    this.state.lastShotWeaponId = weapon.id;
     this.state.phase = "flying";
-    this.state.message = `${player.name} 발사`;
-    this.state.projectile = { x: projectile.x, y: projectile.y };
+    this.state.message = `${player.name} ${weapon.name} 발사`;
+    this.state.projectile = { x: projectile.x, y: projectile.y, weaponId: weapon.id };
     this.sync();
 
     this.stopShot();
     this.interval = setInterval(() => {
       const delta = SHOT_STEP_MS / 1000;
       projectile.life += delta;
-      projectile.vx += this.state.wind * 18 * delta;
+      projectile.vx += this.state.wind * weapon.windInfluence * delta;
       projectile.vy += GRAVITY * delta;
       projectile.x += projectile.vx * delta;
       projectile.y += projectile.vy * delta;
-      this.state.projectile = { x: projectile.x, y: projectile.y };
+      this.state.projectile = { x: projectile.x, y: projectile.y, weaponId: weapon.id };
 
       const out =
         projectile.x < -40 ||
@@ -231,7 +275,7 @@ export class GameSession {
         projectile.y > 0 &&
         isSolidTerrainAt(projectile.x, projectile.y, this.state.terrainHoles, this.state.terrainSeed)
       ) {
-        this.explodeAt(projectile.x, projectile.y);
+        this.explodeAt(projectile.x, projectile.y, weapon);
         return;
       }
 
@@ -244,6 +288,7 @@ export class GameSession {
     const player = this.currentPlayer;
     const target = this.chooseTarget(player);
     if (!target) return;
+    this.turnPlayer(player, target.x >= player.x ? 1 : -1);
 
     this.state.message = `${player.name} 생각 중`;
     this.sync(false);
@@ -256,6 +301,7 @@ export class GameSession {
     const shot = this.findBestShot(player, target);
     const noisyShot = this.addAimingNoise(player, shot);
     player.angle = noisyShot.angle;
+    this.syncFacingToAngle(player);
     player.power = MIN_POWER;
     this.state.message = `${player.name} 조준 중`;
     this.sync(false);
@@ -284,6 +330,7 @@ export class GameSession {
     }
 
     if (bestDirection) {
+      this.turnPlayer(player, bestDirection);
       this.tryMovePlayer(player, bestDirection * Math.min(28, player.move));
     }
   }
@@ -320,8 +367,9 @@ export class GameSession {
   }
 
   private simulateShot(player: PlayerState, angle: number, power: number, target: PlayerState): SimulatedShot {
+    const weapon = this.getSelectedWeapon(player);
     const radians = (angle / 180) * Math.PI;
-    const speed = getShotSpeed(power);
+    const speed = getShotSpeed(power, weapon);
     let x = player.x + Math.cos(radians) * 34;
     let y = player.y - 16 - Math.sin(radians) * 34;
     let vx = Math.cos(radians) * speed;
@@ -331,7 +379,7 @@ export class GameSession {
     while (life < 8) {
       const delta = SHOT_STEP_MS / 1000;
       life += delta;
-      vx += this.state.wind * 18 * delta;
+      vx += this.state.wind * weapon.windInfluence * delta;
       vy += GRAVITY * delta;
       x += vx * delta;
       y += vy * delta;
@@ -364,7 +412,7 @@ export class GameSession {
     const angle = shot.angle + (Math.random() * 2 - 1) * angleNoise;
     const power = shot.power + (Math.random() * 2 - 1) * powerNoise;
     return {
-      angle: clamp(angle, player.x <= WORLD_WIDTH / 2 ? 5 : 95, player.x <= WORLD_WIDTH / 2 ? 85 : 175),
+      angle: clamp(angle, player.facing === 1 ? 5 : 95, player.facing === 1 ? 85 : 175),
       power: clamp(power, MIN_POWER, MAX_POWER)
     };
   }
@@ -379,18 +427,18 @@ export class GameSession {
       .sort((a, b) => a.score - b.score)[0]?.enemy;
   }
 
-  private explodeAt(x: number, y: number) {
+  private explodeAt(x: number, y: number, weapon: WeaponDefinition) {
     this.stopShot();
-    const crater: TerrainCrater = { x, y, radius: EXPLOSION_RADIUS };
+    const crater: TerrainCrater = { x, y, radius: weapon.craterRadius };
     this.state.terrainHoles.push(crater);
     const shooter = this.currentPlayer;
     const targetBeforeExplosion = this.chooseTarget(shooter);
 
     this.state.players.forEach((player) => {
       const distance = Math.hypot(x - player.x, y - (player.y - 8));
-      if (distance < EXPLOSION_RADIUS * 2.25) {
-        const damage = Math.round(lerp(44, 8, distance / (EXPLOSION_RADIUS * 2.25)));
-        player.hp = clamp(player.hp - damage, 0, MAX_HP);
+      if (distance < weapon.damageRadius) {
+        const damage = Math.round(lerp(weapon.maxDamage, weapon.minDamage, distance / weapon.damageRadius));
+        player.hp = clamp(player.hp - damage, 0, player.maxHp);
       }
       if (player.hp > 0 && !this.hasSupportBelow(player)) {
         this.fallVelocity.set(player.id, Math.max(this.fallVelocity.get(player.id) ?? 0, 46));
@@ -452,9 +500,10 @@ export class GameSession {
       if (candidate.hp > 0 && (candidate.kind === "computer" || candidate.connected)) {
         this.state.activePlayerId = candidate.id;
         candidate.power = MIN_POWER;
-        candidate.move = MAX_MOVE;
+        candidate.move = candidate.maxMove;
         this.state.wind = randomWind();
         this.state.phase = "aim";
+        this.startTurnTimer();
         this.state.message = `${candidate.name} 턴`;
         return;
       }
@@ -489,12 +538,29 @@ export class GameSession {
     if (!bodyClear) return false;
     player.x = targetX;
     this.snapPlayerToGround(player);
-    if (commit) player.move = clamp(player.move - Math.abs(actualDistance), 0, MAX_MOVE);
+    if (commit) player.move = clamp(player.move - Math.abs(actualDistance), 0, player.maxMove);
     return true;
   }
 
   private clampPlayerAngle(player: PlayerState) {
-    player.angle = clamp(player.angle, player.x <= WORLD_WIDTH / 2 ? 5 : 95, player.x <= WORLD_WIDTH / 2 ? 85 : 175);
+    player.angle = clamp(player.angle, player.facing === 1 ? 5 : 95, player.facing === 1 ? 85 : 175);
+  }
+
+  private turnPlayer(player: PlayerState, facing: -1 | 1) {
+    if (player.facing === facing) return;
+    const displayedAngle = this.getDisplayedAimAngle(player);
+    player.facing = facing;
+    player.angle = facing === 1 ? displayedAngle : 180 - displayedAngle;
+    this.clampPlayerAngle(player);
+  }
+
+  private getDisplayedAimAngle(player: PlayerState) {
+    return clamp(player.facing === 1 ? player.angle : 180 - player.angle, 0, 90);
+  }
+
+  private syncFacingToAngle(player: PlayerState) {
+    player.facing = player.angle <= 90 ? 1 : -1;
+    this.clampPlayerAngle(player);
   }
 
   private canAct(socketId: string) {
@@ -504,6 +570,14 @@ export class GameSession {
       this.currentPlayer.kind === "human" &&
       this.currentPlayer.socketId === socketId
     );
+  }
+
+  private getSelectedWeapon(player: PlayerState) {
+    const tank = getTankDefinition(player.tankId);
+    const weaponId = tank.weaponIds.includes(player.selectedWeaponId)
+      ? player.selectedWeaponId
+      : tank.defaultWeaponId;
+    return getWeaponDefinition(weaponId);
   }
 
   private get currentPlayer() {
@@ -535,6 +609,7 @@ export class GameSession {
     const slotIndex = this.state.players.length;
     const teamId = (slotIndex === 0 ? "A" : "B") as TeamId;
     const spawnX = randomSpawnX(this.state.terrainSeed);
+    const tank = getTankDefinition(this.getTankIdForSlot(slotIndex));
     const player: PlayerState = {
       id,
       slotIndex,
@@ -542,15 +617,21 @@ export class GameSession {
       teamId,
       name: kind === "human" ? `플레이어 ${slotIndex + 1}` : `컴퓨터 ${slotIndex + 1}`,
       color: PLAYER_COLORS[slotIndex % PLAYER_COLORS.length],
+      tankId: tank.id,
+      selectedWeaponId: tank.defaultWeaponId,
+      inventory: getDefaultInventory(tank.id),
       socketId,
       connected: kind === "computer" || Boolean(socketId),
       x: spawnX,
       y: 0,
       slope: 0,
+      facing: spawnX <= WORLD_WIDTH / 2 ? 1 : -1,
       angle: spawnX <= WORLD_WIDTH / 2 ? 45 : 135,
       power: MIN_POWER,
-      move: MAX_MOVE,
-      hp: MAX_HP,
+      maxMove: tank.maxMove,
+      move: tank.maxMove,
+      maxHp: tank.maxHp,
+      hp: tank.maxHp,
       ai:
         kind === "computer"
           ? {
@@ -566,22 +647,34 @@ export class GameSession {
   private resetCombatState() {
     this.stopShot();
     this.clearAI();
+    this.clearTurnTimer();
     this.fallVelocity.clear();
     this.state.terrainHoles = [];
     this.state.projectile = undefined;
     this.state.winnerId = undefined;
     this.state.winnerTeamId = undefined;
     this.state.lastShotPower = undefined;
+    this.state.lastShotWeaponId = undefined;
     this.state.wind = randomWind();
     this.state.terrainSeed = randomTerrainSeed();
     const spawnXs = createRandomSpawnXs(this.state.players.length, this.state.terrainSeed);
     this.state.players.forEach((player, index) => {
+      const tank = getTankDefinition(player.tankId);
       player.slotIndex = index;
       player.x = spawnXs[index] ?? randomSpawnX(this.state.terrainSeed);
-      player.angle = player.x <= WORLD_WIDTH / 2 ? 45 : 135;
+      player.facing = player.x <= WORLD_WIDTH / 2 ? 1 : -1;
+      player.angle = player.facing === 1 ? 45 : 135;
       player.power = MIN_POWER;
-      player.move = MAX_MOVE;
-      player.hp = MAX_HP;
+      player.maxMove = tank.maxMove;
+      player.move = tank.maxMove;
+      player.maxHp = tank.maxHp;
+      player.hp = tank.maxHp;
+      if (!tank.weaponIds.includes(player.selectedWeaponId)) {
+        player.selectedWeaponId = tank.defaultWeaponId;
+      }
+      if (player.inventory.length !== tank.itemSlots) {
+        player.inventory = getDefaultInventory(tank.id);
+      }
       this.snapPlayerToGround(player);
     });
   }
@@ -666,6 +759,7 @@ export class GameSession {
   private finishGameIfNeeded() {
     const winnerTeamId = this.getWinnerTeamId();
     if (!winnerTeamId) return false;
+    this.clearTurnTimer();
     this.state.phase = "gameover";
     this.state.winnerTeamId = winnerTeamId;
     this.state.winnerId =
@@ -693,12 +787,46 @@ export class GameSession {
   private reindexSlots() {
     this.state.players.forEach((player, index) => {
       player.slotIndex = index;
+      if (this.state.phase !== "waiting" || player.kind !== "computer") return;
+
+      this.applyTankToPlayer(player, this.getTankIdForSlot(index));
     });
   }
 
+  private getTankIdForSlot(slotIndex: number) {
+    return PLAYABLE_TANK_IDS[slotIndex % PLAYABLE_TANK_IDS.length];
+  }
+
+  private getRandomTankId() {
+    return PLAYABLE_TANK_IDS[Math.floor(Math.random() * PLAYABLE_TANK_IDS.length)];
+  }
+
+  private isPlayableTankId(tankId: string): tankId is (typeof PLAYABLE_TANK_IDS)[number] {
+    return PLAYABLE_TANK_IDS.includes(tankId as (typeof PLAYABLE_TANK_IDS)[number]);
+  }
+
+  private applyTankToPlayer(player: PlayerState, tankId: TankId) {
+    const tank = getTankDefinition(tankId);
+    player.tankId = tank.id;
+    player.selectedWeaponId = tank.defaultWeaponId;
+    player.inventory = getDefaultInventory(tank.id);
+    player.maxMove = tank.maxMove;
+    player.move = Math.min(player.move, tank.maxMove);
+    player.maxHp = tank.maxHp;
+    player.hp = Math.min(player.hp, tank.maxHp);
+  }
+
   private sync(allowAI = true) {
-    this.broadcast(this.state);
+    this.broadcast(this.getBroadcastState());
     if (allowAI) this.maybeScheduleAI();
+  }
+
+  getBroadcastState(): GameState {
+    return {
+      ...this.state,
+      turnRemainingMs:
+        this.state.turnEndsAt === undefined ? undefined : Math.max(0, this.state.turnEndsAt - Date.now())
+    };
   }
 
   private maybeScheduleAI() {
@@ -711,6 +839,26 @@ export class GameSession {
     if (!this.aiTimeout) return;
     clearTimeout(this.aiTimeout);
     this.aiTimeout = undefined;
+  }
+
+  private startTurnTimer() {
+    this.clearTurnTimer();
+    this.state.turnEndsAt = Date.now() + TURN_DURATION_MS;
+    this.turnTimeout = setTimeout(() => {
+      if (this.state.phase !== "aim") return;
+      this.state.message = `${this.currentPlayer.name} 시간 초과`;
+      this.advanceTurn();
+      this.sync();
+    }, TURN_DURATION_MS);
+  }
+
+  private clearTurnTimer() {
+    if (this.turnTimeout) {
+      clearTimeout(this.turnTimeout);
+      this.turnTimeout = undefined;
+    }
+    this.state.turnEndsAt = undefined;
+    this.state.turnRemainingMs = undefined;
   }
 
   private stopShot() {
@@ -728,8 +876,8 @@ function randomTerrainSeed() {
   return Math.floor(Math.random() * 2147483647);
 }
 
-function getShotSpeed(power: number) {
-  return SHOT_BASE_SPEED + clamp(power, MIN_POWER, MAX_POWER) * SHOT_POWER_SCALE;
+function getShotSpeed(power: number, weapon: WeaponDefinition) {
+  return weapon.shotBaseSpeed + clamp(power, MIN_POWER, MAX_POWER) * weapon.shotPowerScale;
 }
 
 function randomSpawnX(terrainSeed: number) {

@@ -4,3 +4,6 @@ dist/
 .env.*
 *.log
 *.zip
+tmp/
+__pycache__/
+*.pyc

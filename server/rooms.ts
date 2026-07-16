@@ -26,7 +26,7 @@ export class RoomManager {
     if (playerId === undefined) {
       return { ok: false, message: "방이 가득 찼거나 이미 게임이 시작되었습니다." };
     }
-    return { ok: true, roomId: normalizedRoomId, playerId, state: room.state };
+    return { ok: true, roomId: normalizedRoomId, playerId, state: room.getBroadcastState() };
   }
 
   addComputer(socketId: string, roomId: string | undefined, difficulty?: AIDifficulty) {
@@ -43,6 +43,16 @@ export class RoomManager {
 
   setTeam(socketId: string, roomId: string | undefined, playerId: number, teamId: "A" | "B" | "C" | "D") {
     this.getRoom(roomId)?.setTeam(socketId, playerId, teamId);
+  }
+
+  setTank(socketId: string, roomId: string | undefined, playerId: number, tankId: string) {
+    this.getRoom(roomId)?.setTank(socketId, playerId, tankId);
+  }
+
+  randomizeComputerTanks(socketId: string, roomId: string | undefined) {
+    const room = this.getRoom(roomId);
+    if (!room) return { ok: false, message: "방을 찾을 수 없습니다." };
+    return room.randomizeComputerTanks(socketId);
   }
 
   startMatch(socketId: string, roomId: string | undefined) {

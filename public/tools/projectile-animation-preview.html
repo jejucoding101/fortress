@@ -1,0 +1,775 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>미사일 프레임 에디터</title>
+    <style>
+      :root {
+        --bg: #edf6fb;
+        --panel: #fff;
+        --ink: #17232d;
+        --muted: #62717d;
+        --line: #cddbe4;
+        --accent: #2176ff;
+        --danger: #d43c2f;
+        --good: #16875d;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        padding: 14px;
+        font-family: "Segoe UI", "Noto Sans KR", Arial, sans-serif;
+        color: var(--ink);
+        background: var(--bg);
+      }
+
+      header,
+      .workspace,
+      .panel {
+        max-width: 1500px;
+        margin: 0 auto;
+      }
+
+      header {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        align-items: end;
+        margin-bottom: 12px;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 24px;
+      }
+
+      .subtext {
+        margin: 5px 0 0;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      button,
+      select,
+      input {
+        height: 34px;
+        border: 1px solid #aab9c4;
+        border-radius: 6px;
+        background: #fff;
+        color: var(--ink);
+        font: inherit;
+      }
+
+      button {
+        min-width: 82px;
+        padding: 0 12px;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      button.primary {
+        border-color: #145fe0;
+        background: var(--accent);
+        color: #fff;
+      }
+
+      button.danger {
+        border-color: #b52b21;
+        color: #b52b21;
+      }
+
+      .top-actions,
+      .edit-controls,
+      .frame-buttons {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+      }
+
+      .workspace {
+        display: grid;
+        grid-template-columns: minmax(280px, 360px) 1fr;
+        gap: 12px;
+      }
+
+      .panel {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--panel);
+        box-shadow: 0 8px 22px rgba(25, 44, 58, 0.08);
+      }
+
+      .sidebar {
+        padding: 10px;
+      }
+
+      .missile-list {
+        display: grid;
+        gap: 7px;
+      }
+
+      .missile-button {
+        display: grid;
+        grid-template-columns: 52px 1fr;
+        gap: 8px;
+        align-items: center;
+        width: 100%;
+        min-height: 54px;
+        padding: 6px;
+        text-align: left;
+      }
+
+      .missile-button.active {
+        border-color: var(--accent);
+        box-shadow: inset 0 0 0 2px rgba(33, 118, 255, 0.2);
+      }
+
+      .missile-button img {
+        width: 48px;
+        height: 38px;
+        object-fit: contain;
+      }
+
+      .missile-button b,
+      .missile-button span {
+        display: block;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .missile-button span {
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 400;
+      }
+
+      .editor {
+        overflow: hidden;
+      }
+
+      .toolbar {
+        display: grid;
+        gap: 10px;
+        padding: 10px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .edit-controls label {
+        display: grid;
+        grid-template-columns: 52px 92px 58px;
+        gap: 6px;
+        align-items: center;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      input[type="range"] {
+        width: 92px;
+        accent-color: var(--accent);
+      }
+
+      .stage {
+        position: relative;
+        height: 430px;
+        background-color: #f8fbfd;
+        background-image:
+          linear-gradient(45deg, #e1e8ee 25%, transparent 25%),
+          linear-gradient(-45deg, #e1e8ee 25%, transparent 25%),
+          linear-gradient(45deg, transparent 75%, #e1e8ee 75%),
+          linear-gradient(-45deg, transparent 75%, #e1e8ee 75%);
+        background-position:
+          0 0,
+          0 10px,
+          10px -10px,
+          -10px 0;
+        background-size: 20px 20px;
+      }
+
+      canvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+      }
+
+      #stage {
+        cursor: grab;
+        touch-action: none;
+      }
+
+      #stage.dragging {
+        cursor: grabbing;
+      }
+
+      .strip {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: 6px;
+        padding: 10px;
+        border-top: 1px solid var(--line);
+      }
+
+      .frame-cell {
+        position: relative;
+        height: 76px;
+        border: 1px solid #d7e2ea;
+        border-radius: 6px;
+        overflow: hidden;
+        background: #f6fafc;
+        cursor: pointer;
+      }
+
+      .frame-cell.active {
+        border-color: var(--accent);
+        box-shadow: inset 0 0 0 2px rgba(33, 118, 255, 0.24);
+      }
+
+      .frame-cell canvas {
+        width: 100%;
+        height: 100%;
+      }
+
+      .frame-cell span {
+        position: absolute;
+        left: 4px;
+        top: 3px;
+        padding: 1px 4px;
+        border-radius: 4px;
+        background: rgba(255, 255, 255, 0.86);
+        color: var(--muted);
+        font-size: 10px;
+        font-weight: 800;
+      }
+
+      .status {
+        min-height: 20px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .status.good {
+        color: var(--good);
+        font-weight: 700;
+      }
+
+      .status.bad {
+        color: var(--danger);
+        font-weight: 700;
+      }
+
+      .metric {
+        color: var(--muted);
+        font-family: Consolas, "Courier New", monospace;
+        font-size: 12px;
+      }
+
+      @media (max-width: 860px) {
+        header,
+        .workspace {
+          display: block;
+        }
+
+        .sidebar {
+          margin-bottom: 12px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div>
+        <h1>미사일 프레임 에디터</h1>
+        <p class="subtext">프레임별 위치와 스케일을 조정한 뒤 Apply로 게임용 PNG 시트와 에셋 버전을 갱신합니다.</p>
+      </div>
+      <div class="top-actions">
+        <button id="play-toggle" class="primary" type="button">일시정지</button>
+        <button id="apply" class="primary" type="button">Apply</button>
+      </div>
+    </header>
+
+    <div class="workspace">
+      <aside class="panel sidebar">
+        <div id="missile-list" class="missile-list"></div>
+      </aside>
+
+      <main class="panel editor">
+        <div class="toolbar">
+          <div class="frame-buttons">
+            <button id="prev-frame" type="button">이전</button>
+            <button id="next-frame" type="button">다음</button>
+            <button id="copy-to-loop" type="button">2→4, 3→5</button>
+            <button id="reset-frame" class="danger" type="button">프레임 리셋</button>
+            <button id="reset-missile" class="danger" type="button">미사일 리셋</button>
+          </div>
+          <div class="edit-controls">
+            <label>X <input id="offset-x" type="range" min="-180" max="180" step="1" value="0" /><span id="offset-x-value">0</span></label>
+            <label>Y <input id="offset-y" type="range" min="-140" max="140" step="1" value="0" /><span id="offset-y-value">0</span></label>
+            <label>Scale <input id="frame-scale" type="range" min="50" max="160" step="1" value="100" /><span id="frame-scale-value">100%</span></label>
+            <label>Zoom <input id="zoom" type="range" min="60" max="220" step="1" value="130" /><span id="zoom-value">130%</span></label>
+            <label>Ghost <input id="ghost-alpha" type="range" min="10" max="80" step="1" value="48" /><span id="ghost-alpha-value">48%</span></label>
+          </div>
+          <div id="metric" class="metric"></div>
+          <div id="status" class="status"></div>
+        </div>
+        <div class="stage"><canvas id="stage" width="980" height="430"></canvas></div>
+        <div id="strip" class="strip"></div>
+      </main>
+    </div>
+
+    <script>
+      const projectiles = [
+        ["ladybug_bomb", "무당벌레 탱크", "레이디버그 밤"],
+        ["torpedo", "파란색 물탱크", "버블 토피도"],
+        ["seed_pod", "식물 탱크", "씨앗 포드"],
+        ["drill_rocket", "드릴 탱크", "드릴 로켓"],
+        ["plasma_pearl", "보라 게 탱크", "플라즈마 펄"],
+        ["rescue_capsule", "구급 탱크", "레스큐 캡슐"],
+        ["ice_crystal", "얼음 제트 탱크", "아이스 크리스탈"]
+      ].map(([id, tank, weapon]) => ({
+        id,
+        tank,
+        weapon,
+        filename: `${id}_flight_sheet.png`,
+        file: `../assets/projectiles/${id}_flight_base_sheet.png?editor=${Date.now()}`,
+        image: new Image(),
+        frameWidth: 0,
+        frameHeight: 0,
+        edits: Array.from({ length: 5 }, () => ({ x: 0, y: 0, scale: 1 }))
+      }));
+
+      const frameCount = 5;
+      const outputPaddingX = 180;
+      const outputPaddingY = 80;
+      const list = document.querySelector("#missile-list");
+      const strip = document.querySelector("#strip");
+      const stage = document.querySelector("#stage");
+      const ctx = stage.getContext("2d");
+      const statusEl = document.querySelector("#status");
+      const metricEl = document.querySelector("#metric");
+      const playToggle = document.querySelector("#play-toggle");
+      const applyButton = document.querySelector("#apply");
+      const prevButton = document.querySelector("#prev-frame");
+      const nextButton = document.querySelector("#next-frame");
+      const copyLoopButton = document.querySelector("#copy-to-loop");
+      const resetFrameButton = document.querySelector("#reset-frame");
+      const resetMissileButton = document.querySelector("#reset-missile");
+      const offsetX = document.querySelector("#offset-x");
+      const offsetY = document.querySelector("#offset-y");
+      const frameScale = document.querySelector("#frame-scale");
+      const zoom = document.querySelector("#zoom");
+      const ghostAlpha = document.querySelector("#ghost-alpha");
+      const offsetXValue = document.querySelector("#offset-x-value");
+      const offsetYValue = document.querySelector("#offset-y-value");
+      const frameScaleValue = document.querySelector("#frame-scale-value");
+      const zoomValue = document.querySelector("#zoom-value");
+      const ghostAlphaValue = document.querySelector("#ghost-alpha-value");
+
+      let activeProjectile = 0;
+      let activeFrame = 0;
+      let isPlaying = true;
+      let lastFrameAt = performance.now();
+      let isDragging = false;
+      let dragStart = { x: 0, y: 0, editX: 0, editY: 0, displayScale: 1 };
+
+      function setStatus(text, kind = "") {
+        statusEl.textContent = text;
+        statusEl.className = `status ${kind}`;
+      }
+
+      function loadImages() {
+        let loaded = 0;
+        projectiles.forEach((projectile, index) => {
+          projectile.image.onload = () => {
+            projectile.frameWidth = Math.floor(projectile.image.naturalWidth / frameCount);
+            projectile.frameHeight = projectile.image.naturalHeight;
+            loaded += 1;
+            if (loaded === projectiles.length) {
+              finishLoading();
+            }
+          };
+          projectile.image.onerror = () => setStatus(`${projectile.filename} 로드 실패`, "bad");
+          projectile.image.src = projectile.file;
+        });
+      }
+
+      async function finishLoading() {
+        await loadSavedEdits();
+        buildList();
+        selectProjectile(0);
+        setStatus("로드 완료", "good");
+        requestAnimationFrame(tick);
+      }
+
+      async function loadSavedEdits() {
+        try {
+          const response = await fetch(`../assets/projectiles/projectile_frame_edits.json?editor=${Date.now()}`);
+          if (!response.ok) return;
+          const saved = await response.json();
+          projectiles.forEach((projectile) => {
+            const edits = saved[projectile.id];
+            if (!Array.isArray(edits) || edits.length !== frameCount) return;
+            projectile.edits = edits.map((edit) => ({
+              x: Number.isFinite(edit?.x) ? edit.x : 0,
+              y: Number.isFinite(edit?.y) ? edit.y : 0,
+              scale: Number.isFinite(edit?.scale) ? edit.scale : 1
+            }));
+          });
+        } catch {
+          // The first run intentionally starts with neutral edits.
+        }
+      }
+
+      function buildList() {
+        list.innerHTML = "";
+        projectiles.forEach((projectile, index) => {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "missile-button";
+          button.innerHTML = `<canvas width="52" height="38"></canvas><span><b>${projectile.tank}</b><span>${projectile.weapon}</span></span>`;
+          const canvas = button.querySelector("canvas");
+          drawFrameToCanvas(projectile, 0, canvas, false);
+          button.addEventListener("click", () => selectProjectile(index));
+          list.append(button);
+        });
+      }
+
+      function selectProjectile(index) {
+        activeProjectile = index;
+        activeFrame = 0;
+        [...list.children].forEach((child, childIndex) => child.classList.toggle("active", childIndex === index));
+        buildStrip();
+        syncControls();
+        draw();
+      }
+
+      function buildStrip() {
+        strip.innerHTML = "";
+        const projectile = currentProjectile();
+        for (let frame = 0; frame < frameCount; frame += 1) {
+          const cell = document.createElement("button");
+          cell.type = "button";
+          cell.className = "frame-cell";
+          cell.innerHTML = `<span>${frame + 1}</span><canvas width="160" height="76"></canvas>`;
+          drawFrameToCanvas(projectile, frame, cell.querySelector("canvas"), true);
+          cell.addEventListener("click", () => {
+            activeFrame = frame;
+            isPlaying = false;
+            updatePlayButton();
+            syncControls();
+            draw();
+          });
+          strip.append(cell);
+        }
+        markActiveFrame();
+      }
+
+      function currentProjectile() {
+        return projectiles[activeProjectile];
+      }
+
+      function currentEdit() {
+        return currentProjectile().edits[activeFrame];
+      }
+
+      function syncControls() {
+        const edit = currentEdit();
+        offsetX.value = String(edit.x);
+        offsetY.value = String(edit.y);
+        frameScale.value = String(Math.round(edit.scale * 100));
+        offsetXValue.textContent = String(edit.x);
+        offsetYValue.textContent = String(edit.y);
+        frameScaleValue.textContent = `${Math.round(edit.scale * 100)}%`;
+        zoomValue.textContent = `${zoom.value}%`;
+        ghostAlphaValue.textContent = `${ghostAlpha.value}%`;
+        updateMetric();
+      }
+
+      function updateMetric() {
+        const projectile = currentProjectile();
+        const edit = currentEdit();
+        metricEl.textContent = `${projectile.filename} | frame ${activeFrame + 1}/5 | ${projectile.frameWidth}x${projectile.frameHeight} | x=${edit.x}, y=${edit.y}, scale=${edit.scale.toFixed(2)}`;
+      }
+
+      function applyControlValues() {
+        const edit = currentEdit();
+        edit.x = Number(offsetX.value);
+        edit.y = Number(offsetY.value);
+        edit.scale = Number(frameScale.value) / 100;
+        syncControls();
+        buildStrip();
+        draw();
+      }
+
+      function drawFrameToCanvas(projectile, frame, canvas, useEdit) {
+        const context = canvas.getContext("2d");
+        context.clearRect(0, 0, canvas.width, canvas.height);
+        const scale = Math.min((canvas.width - 10) / projectile.frameWidth, (canvas.height - 10) / projectile.frameHeight);
+        const edit = useEdit ? projectile.edits[frame] : { x: 0, y: 0, scale: 1 };
+        const width = projectile.frameWidth * scale * edit.scale;
+        const height = projectile.frameHeight * scale * edit.scale;
+        const x = (canvas.width - width) / 2 + edit.x * scale;
+        const y = (canvas.height - height) / 2 + edit.y * scale;
+        context.drawImage(
+          projectile.image,
+          frame * projectile.frameWidth,
+          0,
+          projectile.frameWidth,
+          projectile.frameHeight,
+          x,
+          y,
+          width,
+          height
+        );
+      }
+
+      function draw() {
+        const projectile = currentProjectile();
+        const edit = currentEdit();
+        ctx.clearRect(0, 0, stage.width, stage.height);
+        drawGuides();
+
+        const baseScale = Math.min(460 / projectile.frameWidth, 280 / projectile.frameHeight);
+        const displayScale = baseScale * (Number(zoom.value) / 100);
+
+        ctx.save();
+        ctx.globalAlpha = Number(ghostAlpha.value) / 100;
+        for (let frame = 0; frame < frameCount; frame += 1) {
+          if (frame === activeFrame) continue;
+          drawEditedFrame(projectile, frame, displayScale);
+        }
+        ctx.restore();
+
+        ctx.save();
+        ctx.globalAlpha = 1;
+        drawEditedFrame(projectile, activeFrame, displayScale);
+        ctx.restore();
+
+        markActiveFrame();
+        updateMetric();
+      }
+
+      function drawEditedFrame(projectile, frame, displayScale) {
+        const edit = projectile.edits[frame];
+        const width = projectile.frameWidth * displayScale * edit.scale;
+        const height = projectile.frameHeight * displayScale * edit.scale;
+        const x = (stage.width - width) / 2 + edit.x * displayScale;
+        const y = (stage.height - height) / 2 + edit.y * displayScale;
+        ctx.drawImage(
+          projectile.image,
+          frame * projectile.frameWidth,
+          0,
+          projectile.frameWidth,
+          projectile.frameHeight,
+          x,
+          y,
+          width,
+          height
+        );
+      }
+
+      function drawGuides() {
+        ctx.save();
+        ctx.strokeStyle = "rgba(33, 118, 255, 0.72)";
+        ctx.lineWidth = 1;
+        ctx.setLineDash([6, 6]);
+        ctx.beginPath();
+        ctx.moveTo(stage.width / 2, 0);
+        ctx.lineTo(stage.width / 2, stage.height);
+        ctx.moveTo(0, stage.height / 2);
+        ctx.lineTo(stage.width, stage.height / 2);
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      function markActiveFrame() {
+        [...strip.children].forEach((child, index) => child.classList.toggle("active", index === activeFrame));
+      }
+
+      function renderAdjustedSheet(projectile) {
+        const canvas = document.createElement("canvas");
+        const outputFrameWidth = projectile.frameWidth + outputPaddingX * 2;
+        const outputFrameHeight = projectile.frameHeight + outputPaddingY * 2;
+        canvas.width = outputFrameWidth * frameCount;
+        canvas.height = outputFrameHeight;
+        const context = canvas.getContext("2d");
+        context.clearRect(0, 0, canvas.width, canvas.height);
+        for (let frame = 0; frame < frameCount; frame += 1) {
+          const edit = projectile.edits[frame];
+          const width = projectile.frameWidth * edit.scale;
+          const height = projectile.frameHeight * edit.scale;
+          const x = frame * outputFrameWidth + outputPaddingX + (projectile.frameWidth - width) / 2 + edit.x;
+          const y = outputPaddingY + (projectile.frameHeight - height) / 2 + edit.y;
+          context.drawImage(
+            projectile.image,
+            frame * projectile.frameWidth,
+            0,
+            projectile.frameWidth,
+            projectile.frameHeight,
+            x,
+            y,
+            width,
+            height
+          );
+        }
+        return canvas.toDataURL("image/png");
+      }
+
+      function getStagePoint(event) {
+        const rect = stage.getBoundingClientRect();
+        return {
+          x: ((event.clientX - rect.left) / rect.width) * stage.width,
+          y: ((event.clientY - rect.top) / rect.height) * stage.height
+        };
+      }
+
+      function getCurrentDisplayScale() {
+        const projectile = currentProjectile();
+        const baseScale = Math.min(460 / projectile.frameWidth, 280 / projectile.frameHeight);
+        return baseScale * (Number(zoom.value) / 100);
+      }
+
+      function updateActiveFrameOffset(x, y) {
+        const edit = currentEdit();
+        edit.x = Math.max(Number(offsetX.min), Math.min(Number(offsetX.max), Math.round(x)));
+        edit.y = Math.max(Number(offsetY.min), Math.min(Number(offsetY.max), Math.round(y)));
+        offsetX.value = String(edit.x);
+        offsetY.value = String(edit.y);
+        offsetXValue.textContent = String(edit.x);
+        offsetYValue.textContent = String(edit.y);
+        updateMetric();
+        draw();
+      }
+
+      async function applyEdits() {
+        setStatus("저장 중...");
+        applyButton.disabled = true;
+        try {
+          const sheets = projectiles.map((projectile) => ({
+            filename: projectile.filename,
+            dataUrl: renderAdjustedSheet(projectile)
+          }));
+          const response = await fetch("http://localhost:3000/dev/projectile-frames", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              sheets,
+              edits: Object.fromEntries(projectiles.map((projectile) => [projectile.id, projectile.edits]))
+            })
+          });
+          const payload = await response.json();
+          if (!payload.ok) throw new Error(payload.error ?? "Apply failed");
+          setStatus(`저장 완료: ${payload.version}`, "good");
+        } catch (error) {
+          setStatus(error instanceof Error ? error.message : "저장 실패", "bad");
+        } finally {
+          applyButton.disabled = false;
+        }
+      }
+
+      function updatePlayButton() {
+        playToggle.textContent = isPlaying ? "일시정지" : "재생";
+        playToggle.classList.toggle("primary", isPlaying);
+      }
+
+      function tick(time) {
+        if (isPlaying && time - lastFrameAt > 1000 / 12) {
+          activeFrame = (activeFrame + 1) % frameCount;
+          syncControls();
+          draw();
+          lastFrameAt = time;
+        }
+        requestAnimationFrame(tick);
+      }
+
+      [offsetX, offsetY, frameScale].forEach((input) => input.addEventListener("input", applyControlValues));
+      zoom.addEventListener("input", () => {
+        zoomValue.textContent = `${zoom.value}%`;
+        draw();
+      });
+      ghostAlpha.addEventListener("input", () => {
+        ghostAlphaValue.textContent = `${ghostAlpha.value}%`;
+        draw();
+      });
+      stage.addEventListener("pointerdown", (event) => {
+        stage.setPointerCapture(event.pointerId);
+        const point = getStagePoint(event);
+        const edit = currentEdit();
+        isDragging = true;
+        isPlaying = false;
+        updatePlayButton();
+        stage.classList.add("dragging");
+        dragStart = {
+          x: point.x,
+          y: point.y,
+          editX: edit.x,
+          editY: edit.y,
+          displayScale: getCurrentDisplayScale()
+        };
+      });
+      stage.addEventListener("pointermove", (event) => {
+        if (!isDragging) return;
+        const point = getStagePoint(event);
+        const nextX = dragStart.editX + (point.x - dragStart.x) / dragStart.displayScale;
+        const nextY = dragStart.editY + (point.y - dragStart.y) / dragStart.displayScale;
+        updateActiveFrameOffset(nextX, nextY);
+      });
+      stage.addEventListener("pointerup", (event) => {
+        if (!isDragging) return;
+        isDragging = false;
+        stage.releasePointerCapture(event.pointerId);
+        stage.classList.remove("dragging");
+      });
+      stage.addEventListener("pointercancel", () => {
+        isDragging = false;
+        stage.classList.remove("dragging");
+      });
+      playToggle.addEventListener("click", () => {
+        isPlaying = !isPlaying;
+        updatePlayButton();
+      });
+      prevButton.addEventListener("click", () => {
+        activeFrame = (activeFrame + frameCount - 1) % frameCount;
+        isPlaying = false;
+        updatePlayButton();
+        syncControls();
+        draw();
+      });
+      nextButton.addEventListener("click", () => {
+        activeFrame = (activeFrame + 1) % frameCount;
+        isPlaying = false;
+        updatePlayButton();
+        syncControls();
+        draw();
+      });
+      copyLoopButton.addEventListener("click", () => {
+        const projectile = currentProjectile();
+        projectile.edits[3] = { ...projectile.edits[1] };
+        projectile.edits[4] = { ...projectile.edits[2] };
+        buildStrip();
+        draw();
+      });
+      resetFrameButton.addEventListener("click", () => {
+        currentProjectile().edits[activeFrame] = { x: 0, y: 0, scale: 1 };
+        syncControls();
+        buildStrip();
+        draw();
+      });
+      resetMissileButton.addEventListener("click", () => {
+        currentProjectile().edits = Array.from({ length: 5 }, () => ({ x: 0, y: 0, scale: 1 }));
+        syncControls();
+        buildStrip();
+        draw();
+      });
+      applyButton.addEventListener("click", applyEdits);
+      updatePlayButton();
+      loadImages();
+    </script>
+  </body>
+</html>

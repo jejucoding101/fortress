@@ -75,8 +75,8 @@
       #sprite {
         width: 86%;
         height: 86%;
-        object-fit: contain;
         image-rendering: pixelated;
+        object-fit: contain;
       }
 
       .controls {
@@ -197,11 +197,11 @@
             </div>
             <label>
               FPS
-              <input id="fps" type="range" min="4" max="24" value="12">
+              <input id="fps" type="range" min="4" max="24" value="6">
             </label>
             <div class="meta">
               <span id="frameLabel">Frame 1 / 16</span>
-              <span id="fpsLabel">12 fps</span>
+              <span id="fpsLabel">6 fps</span>
             </div>
           </div>
         </section>
@@ -232,6 +232,101 @@
           prefix: "red_fire_",
           sheet: "red_tank_fire_4x4_transparent.png",
           frameCount: 16
+        },
+        {
+          id: "blue-idle-sheet",
+          label: "Blue Idle Sheet",
+          folder: "public/assets/tanks",
+          sheet: "tank2_idle_sheet_transparent.png",
+          frameCount: 10,
+          columns: 4,
+          rows: 3,
+          sourceFrames: [0, 1, 2, 4, 5, 6, 7, 8, 9, 11],
+          normalizeAlignment: true
+        },
+        {
+          id: "tank1-idle-sheet",
+          label: "Tank 1 Idle Sheet",
+          folder: "public/assets/tanks",
+          sheet: "tank1_idle_sheet.png",
+          frameCount: 8,
+          columns: 8,
+          rows: 1,
+          frameWidth: 720,
+          frameHeight: 420,
+          frameGap: 72
+        },
+        {
+          id: "tank2-idle-sheet-8",
+          label: "Tank 2 Idle Sheet 8",
+          folder: "public/assets/tanks",
+          sheet: "tank2_idle_sheet_8.png",
+          frameCount: 8,
+          columns: 8,
+          rows: 1,
+          frameWidth: 720,
+          frameHeight: 420,
+          frameGap: 72
+        },
+        {
+          id: "tank3-idle-sheet",
+          label: "Tank 3 Idle Sheet",
+          folder: "public/assets/tanks",
+          sheet: "tank3_idle_sheet.png",
+          frameCount: 8,
+          columns: 8,
+          rows: 1,
+          frameWidth: 720,
+          frameHeight: 420,
+          frameGap: 72
+        },
+        {
+          id: "tank5-idle-sheet",
+          label: "Tank 5 Idle Sheet",
+          folder: "public/assets/tanks",
+          sheet: "tank5_idle_sheet.png",
+          frameCount: 8,
+          columns: 8,
+          rows: 1,
+          frameWidth: 720,
+          frameHeight: 420,
+          frameGap: 72
+        },
+        {
+          id: "tank6-idle-sheet",
+          label: "Tank 6 Idle Sheet",
+          folder: "public/assets/tanks",
+          sheet: "tank6_idle_sheet.png",
+          frameCount: 8,
+          columns: 8,
+          rows: 1,
+          frameWidth: 720,
+          frameHeight: 420,
+          frameGap: 72
+        },
+        {
+          id: "tank8-idle-sheet",
+          label: "Tank 8 Idle Sheet",
+          folder: "public/assets/tanks",
+          sheet: "tank8_idle_sheet.png",
+          frameCount: 8,
+          columns: 8,
+          rows: 1,
+          frameWidth: 720,
+          frameHeight: 420,
+          frameGap: 72
+        },
+        {
+          id: "tank4-idle-sheet",
+          label: "Tank 4 Idle Sheet",
+          folder: "public/assets/tanks",
+          sheet: "tank4_idle_sheet.png",
+          frameCount: 8,
+          columns: 8,
+          rows: 1,
+          frameWidth: 720,
+          frameHeight: 420,
+          frameGap: 72
         }
       ];
 
@@ -251,6 +346,7 @@
       let timer = null;
       let action = actions[0];
       let frames = [];
+      let imageCache = new Map();
 
       actions.forEach((item) => {
         const option = document.createElement("option");
@@ -259,10 +355,37 @@
         actionSelect.appendChild(option);
       });
 
-      function buildFrames() {
-        frames = Array.from({ length: action.frameCount }, (_, index) =>
-          `${action.folder}/${action.prefix}${String(index + 1).padStart(2, "0")}.png`
-        );
+      async function buildFrames() {
+        if (action.prefix) {
+          frames = Array.from({ length: action.frameCount }, (_, index) =>
+            `${action.folder}/${action.prefix}${String(index + 1).padStart(2, "0")}.png`
+          );
+          return;
+        }
+
+        if (!action.sheet || !action.columns || !action.rows) {
+          frames = [];
+          return;
+        }
+
+        const sheetSrc = `${action.folder}/${action.sheet}`;
+        const sheetImage = await loadImage(sheetSrc);
+        const frameWidth = action.frameWidth || Math.floor(sheetImage.naturalWidth / action.columns);
+        const frameHeight = action.frameHeight || Math.floor(sheetImage.naturalHeight / action.rows);
+        const frameGap = action.frameGap || 0;
+        const sourceFrames = action.sourceFrames || Array.from({ length: action.frameCount }, (_, index) => index);
+        frames = sourceFrames.map((sourceFrameIndex) => {
+          const column = sourceFrameIndex % action.columns;
+          const row = Math.floor(sourceFrameIndex / action.columns);
+          return createFrameDataUrl(
+            sheetImage,
+            column * (frameWidth + frameGap),
+            row * (frameHeight + frameGap),
+            frameWidth,
+            frameHeight,
+            action.normalizeAlignment === true
+          );
+        });
       }
 
       function renderGrid() {
@@ -278,13 +401,13 @@
         });
       }
 
-      function loadAction(id) {
+      async function loadAction(id) {
         action = actions.find((item) => item.id === id) || actions[0];
         frame = 0;
-        buildFrames();
+        await buildFrames();
         renderGrid();
         sheet.src = `${action.folder}/${action.sheet}`;
-        sheet.alt = `${action.label} transparent 4x4 sprite sheet`;
+        sheet.alt = `${action.label} transparent sprite sheet`;
         render();
       }
 
@@ -326,8 +449,152 @@
 
       fps.addEventListener("input", schedule);
 
-      loadAction(action.id);
-      schedule();
+      loadAction(action.id).then(schedule);
+
+      function loadImage(src) {
+        if (imageCache.has(src)) {
+          return imageCache.get(src);
+        }
+
+        const promise = new Promise((resolve, reject) => {
+          const image = new Image();
+          image.onload = () => resolve(image);
+          image.onerror = () => reject(new Error(`Failed to load image: ${src}`));
+          image.src = src;
+        });
+
+        imageCache.set(src, promise);
+        return promise;
+      }
+
+      function createFrameDataUrl(image, sx, sy, sw, sh, normalizeAlignment = false) {
+        const canvas = document.createElement("canvas");
+        canvas.width = sw;
+        canvas.height = sh;
+        const context = canvas.getContext("2d");
+        context.clearRect(0, 0, sw, sh);
+
+        if (!normalizeAlignment) {
+          context.drawImage(image, sx, sy, sw, sh, 0, 0, sw, sh);
+          return canvas.toDataURL("image/png");
+        }
+
+        const tempCanvas = document.createElement("canvas");
+        tempCanvas.width = sw;
+        tempCanvas.height = sh;
+        const tempContext = tempCanvas.getContext("2d");
+        tempContext.clearRect(0, 0, sw, sh);
+        tempContext.drawImage(image, sx, sy, sw, sh, 0, 0, sw, sh);
+
+        const imageData = tempContext.getImageData(0, 0, sw, sh);
+        const fullBounds = getObjectBounds(imageData, sw, sh);
+
+        if (!fullBounds) {
+          return canvas.toDataURL("image/png");
+        }
+
+        const trackAnchor = getTrackAnchor(imageData, sw, sh, fullBounds);
+        const boundsWidth = fullBounds.maxX - fullBounds.minX + 1;
+        const boundsHeight = fullBounds.maxY - fullBounds.minY + 1;
+        const alignedX = Math.round(sw / 2 - (trackAnchor.centerX - fullBounds.minX));
+        const baselineY = sh - 26;
+        const alignedY = Math.round(baselineY - (trackAnchor.bottomY - fullBounds.minY));
+
+        context.drawImage(
+          tempCanvas,
+          fullBounds.minX,
+          fullBounds.minY,
+          boundsWidth,
+          boundsHeight,
+          alignedX,
+          alignedY,
+          boundsWidth,
+          boundsHeight
+        );
+        return canvas.toDataURL("image/png");
+      }
+
+      function getObjectBounds(imageData, width, height) {
+        const { data } = imageData;
+        let minX = width;
+        let minY = height;
+        let maxX = -1;
+        let maxY = -1;
+
+        for (let y = 0; y < height; y += 1) {
+          for (let x = 0; x < width; x += 1) {
+            if (!isObjectPixel(data, width, x, y)) continue;
+            if (x < minX) minX = x;
+            if (y < minY) minY = y;
+            if (x > maxX) maxX = x;
+            if (y > maxY) maxY = y;
+          }
+        }
+
+        if (maxX < 0 || maxY < 0) {
+          return null;
+        }
+
+        return { minX, minY, maxX, maxY };
+      }
+
+      function getTrackAnchor(imageData, width, height, fullBounds) {
+        const trackStart = Math.floor(fullBounds.minY + (fullBounds.maxY - fullBounds.minY) * 0.55);
+        let trackMinX = width;
+        let trackMaxX = -1;
+        let trackBottomY = fullBounds.maxY;
+
+        for (let y = trackStart; y <= fullBounds.maxY; y += 1) {
+          for (let x = fullBounds.minX; x <= fullBounds.maxX; x += 1) {
+            if (!isTrackPixel(imageData.data, width, x, y)) continue;
+            if (x < trackMinX) trackMinX = x;
+            if (x > trackMaxX) trackMaxX = x;
+            if (y > trackBottomY) trackBottomY = y;
+          }
+        }
+
+        if (trackMaxX < trackMinX) {
+          return {
+            centerX: (fullBounds.minX + fullBounds.maxX) / 2,
+            bottomY: fullBounds.maxY
+          };
+        }
+
+        return {
+          centerX: (trackMinX + trackMaxX) / 2,
+          bottomY: trackBottomY
+        };
+      }
+
+      function isObjectPixel(data, width, x, y) {
+        const offset = (y * width + x) * 4;
+        const alpha = data[offset + 3];
+        if (alpha <= 8) return false;
+
+        const red = data[offset];
+        const green = data[offset + 1];
+        const blue = data[offset + 2];
+        const max = Math.max(red, green, blue);
+        const min = Math.min(red, green, blue);
+        const saturation = max - min;
+
+        return saturation > 28 || max < 205;
+      }
+
+      function isTrackPixel(data, width, x, y) {
+        const offset = (y * width + x) * 4;
+        const alpha = data[offset + 3];
+        if (alpha <= 8) return false;
+
+        const red = data[offset];
+        const green = data[offset + 1];
+        const blue = data[offset + 2];
+        const max = Math.max(red, green, blue);
+        const min = Math.min(red, green, blue);
+        const saturation = max - min;
+
+        return max < 120 && saturation < 95;
+      }
     </script>
   </body>
 </html>

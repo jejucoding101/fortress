@@ -1,0 +1,603 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>탱크 눈 마스크 편집기</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: Arial, "Malgun Gothic", sans-serif;
+        background: #101821;
+        color: #eaf4ff;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        padding: 24px;
+        background: linear-gradient(180deg, #172230, #0c121a);
+      }
+
+      main {
+        max-width: 1180px;
+        margin: 0 auto;
+      }
+
+      h1 {
+        margin: 0 0 18px;
+        font-size: 28px;
+      }
+
+      .toolbar,
+      .panel {
+        border: 1px solid #2a4862;
+        background: #132234;
+        border-radius: 8px;
+      }
+
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: end;
+        gap: 12px;
+        padding: 14px;
+        margin-bottom: 16px;
+      }
+
+      label {
+        display: grid;
+        gap: 6px;
+        color: #a9c7df;
+        font-size: 13px;
+      }
+
+      select,
+      input,
+      button {
+        height: 36px;
+        border-radius: 6px;
+        border: 1px solid #3c6380;
+        background: #081523;
+        color: #f4fbff;
+        font: inherit;
+      }
+
+      select,
+      input[type="range"] {
+        min-width: 150px;
+      }
+
+      button {
+        padding: 0 14px;
+        cursor: pointer;
+        background: #1b78a5;
+        border-color: #43a7d9;
+        font-weight: 700;
+      }
+
+      button.secondary {
+        background: #263747;
+        border-color: #536c80;
+      }
+
+      button.active {
+        background: #ffb339;
+        color: #14100a;
+        border-color: #ffd06e;
+      }
+
+      .workspace {
+        display: grid;
+        grid-template-columns: 1fr 280px;
+        gap: 16px;
+      }
+
+      .panel {
+        padding: 14px;
+      }
+
+      .canvas-wrap {
+        position: relative;
+        width: min(100%, 720px);
+        aspect-ratio: 720 / 420;
+        margin: 0 auto;
+        border: 1px solid #38556d;
+        background:
+          linear-gradient(45deg, #223244 25%, transparent 25%),
+          linear-gradient(-45deg, #223244 25%, transparent 25%),
+          linear-gradient(45deg, transparent 75%, #223244 75%),
+          linear-gradient(-45deg, transparent 75%, #223244 75%),
+          #18283a;
+        background-position:
+          0 0,
+          0 12px,
+          12px -12px,
+          -12px 0;
+        background-size: 24px 24px;
+        overflow: hidden;
+      }
+
+      canvas {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        image-rendering: auto;
+      }
+
+      #paintCanvas {
+        cursor: crosshair;
+      }
+
+      .side {
+        display: grid;
+        gap: 12px;
+        align-content: start;
+      }
+
+      .hint {
+        margin: 0;
+        color: #b6cfe4;
+        line-height: 1.5;
+        font-size: 14px;
+      }
+
+      .status {
+        min-height: 42px;
+        padding: 10px;
+        border-radius: 6px;
+        background: #0a1420;
+        color: #a8f3c3;
+        line-height: 1.45;
+      }
+
+      .filename {
+        color: #ffd06e;
+        font-weight: 700;
+      }
+
+      @media (max-width: 960px) {
+        .workspace {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>탱크 눈 마스크 편집기</h1>
+
+      <div class="toolbar">
+        <label>
+          탱크
+          <select id="tankSelect"></select>
+        </label>
+        <label>
+          브러시 크기
+          <input id="brushSize" type="range" min="4" max="80" value="28" />
+          <span id="brushSizeLabel">28px</span>
+        </label>
+        <label>
+          마스크 투명도
+          <input id="overlayAlpha" type="range" min="10" max="90" value="52" />
+        </label>
+        <label>
+          마스크 색상
+          <select id="maskColor">
+            <option value="#4a4f57">진한 회색</option>
+            <option value="#ff304c" selected>빨간색</option>
+            <option value="#ff8a18">오렌지색</option>
+            <option value="#22c55e">초록색</option>
+          </select>
+        </label>
+        <button id="paintMode" class="active" type="button">칠하기</button>
+        <button id="eraseMode" class="secondary" type="button">지우기</button>
+        <button id="clearMask" class="secondary" type="button">전체 지우기</button>
+        <button id="loadMask" class="secondary" type="button">마스크 불러오기</button>
+        <button id="saveMask" type="button">마스크 저장</button>
+        <input id="maskFile" type="file" accept="image/png" hidden />
+      </div>
+
+      <div class="workspace">
+        <section class="panel">
+          <div class="canvas-wrap">
+            <canvas id="tankCanvas" width="720" height="420"></canvas>
+            <canvas id="overlayCanvas" width="720" height="420"></canvas>
+            <canvas id="paintCanvas" width="720" height="420"></canvas>
+          </div>
+        </section>
+
+        <aside class="panel side">
+          <p class="hint">
+            눈 전체 영역을 선택한 색상 마스크로 칠하세요. 흰자, 눈동자, 눈꺼풀까지 감길 범위를 모두 포함하는 게 좋습니다.
+          </p>
+          <p class="hint">
+            저장 파일명은 <span id="maskName" class="filename"></span> 입니다. 생성 스크립트는
+            <span class="filename">public/assets/tanks</span> 폴더에서 이 파일을 먼저 읽습니다.
+          </p>
+          <p class="hint">저장 후 파일을 위 폴더에 두고 `python scripts/generate_idle_sheets.py`를 실행하면 됩니다.</p>
+          <p class="hint">브러시 크기는 슬라이더, 캔버스 위 마우스 휠, 또는 [ / ] 키로 조절할 수 있습니다.</p>
+          <div id="status" class="status">탱크를 선택하고 눈 영역을 칠하세요.</div>
+        </aside>
+      </div>
+    </main>
+
+    <script>
+      const FRAME_W = 720;
+      const FRAME_H = 420;
+      const BASELINE_Y = 366;
+      const MAX_TANK_W = 610;
+      const MAX_TANK_H = 330;
+      const SAVE_ENDPOINT = "http://127.0.0.1:3000/dev/eye-mask";
+      const TANKS = [1, 2, 3, 4, 5, 6, 8].map((id) => ({
+        id,
+        label: `Tank ${id}`,
+        src: `public/assets/tanks/tank${id}.png`,
+        mask: `tank${id}_eye_mask.png`
+      }));
+
+      const tankSelect = document.querySelector("#tankSelect");
+      const brushSize = document.querySelector("#brushSize");
+      const brushSizeLabel = document.querySelector("#brushSizeLabel");
+      const overlayAlpha = document.querySelector("#overlayAlpha");
+      const maskColor = document.querySelector("#maskColor");
+      const paintMode = document.querySelector("#paintMode");
+      const eraseMode = document.querySelector("#eraseMode");
+      const clearMask = document.querySelector("#clearMask");
+      const loadMask = document.querySelector("#loadMask");
+      const saveMask = document.querySelector("#saveMask");
+      const maskFile = document.querySelector("#maskFile");
+      const maskName = document.querySelector("#maskName");
+      const status = document.querySelector("#status");
+      const tankCanvas = document.querySelector("#tankCanvas");
+      const overlayCanvas = document.querySelector("#overlayCanvas");
+      const paintCanvas = document.querySelector("#paintCanvas");
+      const tankContext = tankCanvas.getContext("2d");
+      const overlayContext = overlayCanvas.getContext("2d");
+      const paintContext = paintCanvas.getContext("2d");
+      const maskCanvas = document.createElement("canvas");
+      const maskContext = maskCanvas.getContext("2d");
+
+      maskCanvas.width = FRAME_W;
+      maskCanvas.height = FRAME_H;
+
+      let mode = "paint";
+      let drawing = false;
+      let currentTank = TANKS[0];
+      let maskDirty = false;
+
+      TANKS.forEach((tank) => {
+        const option = document.createElement("option");
+        option.value = String(tank.id);
+        option.textContent = tank.label;
+        tankSelect.appendChild(option);
+      });
+
+      function setStatus(message) {
+        status.textContent = message;
+      }
+
+      function setMode(nextMode) {
+        mode = nextMode;
+        paintMode.classList.toggle("active", mode === "paint");
+        eraseMode.classList.toggle("active", mode === "erase");
+      }
+
+      function setBrushSize(size) {
+        const nextSize = Math.max(Number(brushSize.min), Math.min(Number(brushSize.max), Math.round(size)));
+        brushSize.value = String(nextSize);
+        brushSizeLabel.textContent = `${nextSize}px`;
+      }
+
+      async function loadTank(id) {
+        currentTank = TANKS.find((tank) => tank.id === Number(id)) || TANKS[0];
+        maskName.textContent = currentTank.mask;
+        maskContext.clearRect(0, 0, FRAME_W, FRAME_H);
+        await drawTank(currentTank.src);
+        const loadedMask = await loadProjectMask(currentTank);
+        renderOverlay();
+        maskDirty = false;
+        setStatus(
+          loadedMask
+            ? `${currentTank.label} 원본과 기존 마스크를 불러왔습니다. 이어서 수정하세요.`
+            : `${currentTank.label} 원본을 불러왔습니다. 눈 전체 영역을 칠하세요.`
+        );
+      }
+
+      async function drawTank(src) {
+        const image = await loadImage(src);
+        const cutout = removeEdgeCheckerBackground(image);
+        const scale = Math.min(MAX_TANK_W / cutout.width, MAX_TANK_H / cutout.height);
+        const width = Math.round(cutout.width * scale);
+        const height = Math.round(cutout.height * scale);
+        const x = Math.round((FRAME_W - width) / 2);
+        const y = Math.round(BASELINE_Y - height);
+
+        tankContext.clearRect(0, 0, FRAME_W, FRAME_H);
+        tankContext.drawImage(cutout, x, y, width, height);
+      }
+
+      function removeEdgeCheckerBackground(image) {
+        const canvas = document.createElement("canvas");
+        canvas.width = image.naturalWidth;
+        canvas.height = image.naturalHeight;
+        const context = canvas.getContext("2d");
+        context.drawImage(image, 0, 0);
+        const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+        const { data, width, height } = imageData;
+        const visited = new Uint8Array(width * height);
+        const queue = [];
+
+        function isBackground(index) {
+          const offset = index * 4;
+          const red = data[offset];
+          const green = data[offset + 1];
+          const blue = data[offset + 2];
+          const alpha = data[offset + 3];
+          return alpha <= 8 || (Math.min(red, green, blue) >= 218 && Math.max(red, green, blue) - Math.min(red, green, blue) <= 18);
+        }
+
+        function push(x, y) {
+          const index = y * width + x;
+          if (visited[index] || !isBackground(index)) return;
+          visited[index] = 1;
+          queue.push([x, y]);
+        }
+
+        for (let x = 0; x < width; x += 1) {
+          push(x, 0);
+          push(x, height - 1);
+        }
+        for (let y = 0; y < height; y += 1) {
+          push(0, y);
+          push(width - 1, y);
+        }
+
+        while (queue.length) {
+          const [x, y] = queue.shift();
+          if (x > 0) push(x - 1, y);
+          if (x < width - 1) push(x + 1, y);
+          if (y > 0) push(x, y - 1);
+          if (y < height - 1) push(x, y + 1);
+        }
+
+        let minX = width;
+        let minY = height;
+        let maxX = -1;
+        let maxY = -1;
+        for (let y = 0; y < height; y += 1) {
+          for (let x = 0; x < width; x += 1) {
+            const index = y * width + x;
+            const offset = index * 4;
+            if (visited[index]) {
+              data[offset + 3] = 0;
+              continue;
+            }
+            if (data[offset + 3] > 8) {
+              minX = Math.min(minX, x);
+              minY = Math.min(minY, y);
+              maxX = Math.max(maxX, x);
+              maxY = Math.max(maxY, y);
+            }
+          }
+        }
+
+        context.putImageData(imageData, 0, 0);
+        const output = document.createElement("canvas");
+        const padding = 12;
+        const sx = Math.max(0, minX - padding);
+        const sy = Math.max(0, minY - padding);
+        const sw = Math.min(width, maxX + padding) - sx;
+        const sh = Math.min(height, maxY + padding) - sy;
+        output.width = sw;
+        output.height = sh;
+        output.getContext("2d").drawImage(canvas, sx, sy, sw, sh, 0, 0, sw, sh);
+        return output;
+      }
+
+      function loadImage(src) {
+        return new Promise((resolve, reject) => {
+          const image = new Image();
+          image.onload = () => resolve(image);
+          image.onerror = () => reject(new Error(`이미지를 불러오지 못했습니다: ${src}`));
+          image.src = src;
+        });
+      }
+
+      function getCanvasPoint(event) {
+        const rect = paintCanvas.getBoundingClientRect();
+        return {
+          x: ((event.clientX - rect.left) / rect.width) * FRAME_W,
+          y: ((event.clientY - rect.top) / rect.height) * FRAME_H
+        };
+      }
+
+      function paintAt(event) {
+        const point = getCanvasPoint(event);
+        const radius = Number(brushSize.value) / 2;
+        maskContext.save();
+        maskContext.globalCompositeOperation = mode === "paint" ? "source-over" : "destination-out";
+        maskContext.fillStyle = "rgba(255,255,255,1)";
+        maskContext.beginPath();
+        maskContext.arc(point.x, point.y, radius, 0, Math.PI * 2);
+        maskContext.fill();
+        maskContext.restore();
+        renderOverlay();
+      }
+
+      function renderOverlay() {
+        overlayContext.clearRect(0, 0, FRAME_W, FRAME_H);
+        overlayContext.save();
+        overlayContext.globalAlpha = Number(overlayAlpha.value) / 100;
+        overlayContext.fillStyle = maskColor.value;
+        overlayContext.fillRect(0, 0, FRAME_W, FRAME_H);
+        overlayContext.globalCompositeOperation = "destination-in";
+        overlayContext.drawImage(maskCanvas, 0, 0);
+        overlayContext.restore();
+      }
+
+      async function loadProjectMask(tank) {
+        const maskPaths = [`public/assets/tanks/${tank.mask}`, `public/assets/tanks/masks/${tank.mask}`];
+
+        for (const maskPath of maskPaths) {
+          try {
+            const response = await fetch(`${maskPath}?v=${Date.now()}`, { cache: "no-store" });
+            if (!response.ok) continue;
+
+            const blob = await response.blob();
+            const url = URL.createObjectURL(blob);
+            try {
+              const image = await loadImage(url);
+              maskContext.clearRect(0, 0, FRAME_W, FRAME_H);
+              maskContext.drawImage(image, 0, 0, FRAME_W, FRAME_H);
+              return true;
+            } finally {
+              URL.revokeObjectURL(url);
+            }
+          } catch (_error) {
+            // Missing masks are normal while authoring a new tank.
+          }
+        }
+
+        return false;
+      }
+
+      async function saveMaskToProject(tank, silent = false) {
+        const dataUrl = maskCanvas.toDataURL("image/png");
+
+        try {
+          const response = await fetch(SAVE_ENDPOINT, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ filename: tank.mask, dataUrl })
+          });
+
+          if (!response.ok) throw new Error(await response.text());
+
+          const result = await response.json();
+          maskDirty = false;
+          if (!silent) setStatus(`${tank.mask} 자동 저장 완료: ${result.path}`);
+          return true;
+        } catch (_error) {
+          if (!silent) {
+            setStatus("자동 저장 서버를 찾지 못했습니다. npm run dev로 서버를 켠 뒤 다시 저장하세요.");
+          }
+          return false;
+        }
+      }
+
+      async function saveMaskFile() {
+        if (await saveMaskToProject(currentTank)) return;
+
+        const blob = await new Promise((resolve) => maskCanvas.toBlob(resolve, "image/png"));
+        if (!blob) return;
+
+        if ("showSaveFilePicker" in window) {
+          try {
+            const handle = await window.showSaveFilePicker({
+              suggestedName: currentTank.mask,
+              types: [{ description: "PNG mask", accept: { "image/png": [".png"] } }]
+            });
+            const writable = await handle.createWritable();
+            await writable.write(blob);
+            await writable.close();
+            setStatus(`${currentTank.mask} 저장 완료. public/assets/tanks 폴더에 두면 생성 스크립트가 먼저 사용합니다.`);
+            return;
+          } catch (error) {
+            if (error.name === "AbortError") return;
+          }
+        }
+
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = currentTank.mask;
+        link.click();
+        URL.revokeObjectURL(url);
+        setStatus(`${currentTank.mask} 다운로드를 시작했습니다. public/assets/tanks 폴더에 넣어주세요.`);
+      }
+
+      function importMask(file) {
+        if (!file) return;
+        const image = new Image();
+        image.onload = () => {
+          maskContext.clearRect(0, 0, FRAME_W, FRAME_H);
+          maskContext.drawImage(image, 0, 0, FRAME_W, FRAME_H);
+          renderOverlay();
+          maskDirty = true;
+          setStatus(`${file.name} 마스크를 불러왔습니다.`);
+          URL.revokeObjectURL(image.src);
+        };
+        image.src = URL.createObjectURL(file);
+      }
+
+      tankSelect.addEventListener("change", async () => {
+        const previousTank = currentTank;
+        const nextTankId = tankSelect.value;
+        tankSelect.disabled = true;
+
+        if (maskDirty) {
+          setStatus(`${previousTank.mask} 자동 저장 중...`);
+          const saved = await saveMaskToProject(previousTank, true);
+          if (!saved) {
+            tankSelect.value = String(previousTank.id);
+            tankSelect.disabled = false;
+            setStatus("자동 저장 실패. npm run dev로 서버를 켠 뒤 다시 탱크를 선택하세요.");
+            return;
+          }
+        }
+
+        await loadTank(nextTankId);
+        tankSelect.disabled = false;
+      });
+      paintMode.addEventListener("click", () => setMode("paint"));
+      eraseMode.addEventListener("click", () => setMode("erase"));
+      clearMask.addEventListener("click", () => {
+        maskContext.clearRect(0, 0, FRAME_W, FRAME_H);
+        renderOverlay();
+        maskDirty = true;
+        setStatus("마스크를 모두 지웠습니다.");
+      });
+      loadMask.addEventListener("click", () => maskFile.click());
+      saveMask.addEventListener("click", saveMaskFile);
+      maskFile.addEventListener("change", () => importMask(maskFile.files?.[0]));
+      overlayAlpha.addEventListener("input", renderOverlay);
+      maskColor.addEventListener("change", renderOverlay);
+      brushSize.addEventListener("input", () => setBrushSize(Number(brushSize.value)));
+      paintCanvas.addEventListener("wheel", (event) => {
+        event.preventDefault();
+        setBrushSize(Number(brushSize.value) + (event.deltaY > 0 ? -3 : 3));
+      });
+      window.addEventListener("keydown", (event) => {
+        if (event.key === "[") setBrushSize(Number(brushSize.value) - 3);
+        if (event.key === "]") setBrushSize(Number(brushSize.value) + 3);
+      });
+
+      paintCanvas.addEventListener("pointerdown", (event) => {
+        drawing = true;
+        paintCanvas.setPointerCapture(event.pointerId);
+        paintAt(event);
+        maskDirty = true;
+      });
+      paintCanvas.addEventListener("pointermove", (event) => {
+        if (!drawing) return;
+        paintAt(event);
+        maskDirty = true;
+      });
+      paintCanvas.addEventListener("pointerup", () => {
+        drawing = false;
+      });
+      paintCanvas.addEventListener("pointercancel", () => {
+        drawing = false;
+      });
+
+      setBrushSize(Number(brushSize.value));
+      loadTank(currentTank.id);
+    </script>
+  </body>
+</html>
